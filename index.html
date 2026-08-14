@@ -50,9 +50,11 @@
       <div class="timer-banner-warning" id="timerWarning" hidden>This has been running a while — did you forget to stop it?</div>
     </div>
 
-    <div id="statusPanel" class="status-panel">
-      <div class="status-line" id="statusUser">Signed in as —</div>
-      <div class="status-line" id="statusConn">Checking Firestore connection…</div>
+    <div class="status-line err" id="connectionError" hidden></div>
+
+    <div class="home-header">
+      <div class="home-date" id="homeDate">—</div>
+      <div class="home-remaining" id="homeRemaining">—</div>
     </div>
 
     <div class="section-block">

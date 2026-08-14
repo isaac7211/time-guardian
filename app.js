@@ -73,9 +73,10 @@
     }
   }
 
-  function setStatus(el, msg, cls){
-    el.textContent = msg;
-    el.className = 'status-line' + (cls ? ' ' + cls : '');
+  function showConnectionError(msg){
+    const el = document.getElementById('connectionError');
+    if(msg){ el.textContent = msg; el.hidden = false; }
+    else { el.hidden = true; el.textContent = ''; }
   }
 
   function fmtHours(goalMinutes){
@@ -83,23 +84,19 @@
     return (hrs % 1 === 0 ? hrs : hrs.toFixed(2).replace(/0+$/,'').replace(/\.$/,''));
   }
 
-  function cadenceLabel(goalMinutes, cadence){
-    const per = cadence === 'daily' ? 'day' : cadence === 'weekly' ? 'week' : 'month';
-    return `${fmtHours(goalMinutes)} hr / ${per}`;
-  }
-
   function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
   const WEEKDAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-  // Local-timezone YYYY-MM-DD for "today" (avoids the UTC-shift bugs that
+  // Local-timezone YYYY-MM-DD (avoids the UTC-shift bugs that
   // toISOString() has for anyone not at UTC+0).
-  function todayDateStr(){
-    const d = new Date();
+  function dateToStr(d){
     const mm = String(d.getMonth()+1).padStart(2,'0');
     const dd = String(d.getDate()).padStart(2,'0');
     return `${d.getFullYear()}-${mm}-${dd}`;
   }
+  function todayDateStr(){ return dateToStr(new Date()); }
   // Appending T00:00:00 forces the date string to parse in local time
   // instead of UTC, so the weekday matches the calendar date the user picked.
   function weekdayFromDateStr(dateStr){
@@ -115,12 +112,7 @@
     const h12 = h % 12 === 0 ? 12 : h % 12;
     return `${h12}:${String(m).padStart(2,'0')} ${ampm}`;
   }
-  function msToDateStr(ms){
-    const d = new Date(ms);
-    const mm = String(d.getMonth()+1).padStart(2,'0');
-    const dd = String(d.getDate()).padStart(2,'0');
-    return `${d.getFullYear()}-${mm}-${dd}`;
-  }
+  function msToDateStr(ms){ return dateToStr(new Date(ms)); }
   function msToHHMM(ms){
     const d = new Date(ms);
     return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
@@ -141,29 +133,86 @@
     return `${m}:${String(s).padStart(2,'0')}`;
   }
 
+  // ---------- home header + period boundaries ----------
+  // Weekly = Monday-Sunday, monthly = calendar month, per the spec. Computed
+  // fresh on each sign-in so a day/week/month rollover is picked up on
+  // reload even if the tab was left open across the boundary.
+  function computePeriodBounds(){
+    const now = new Date();
+    const dowMonBased = (now.getDay() + 6) % 7; // 0=Mon ... 6=Sun
+    const monday = new Date(now); monday.setDate(now.getDate() - dowMonBased);
+    const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
+    const monthStart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+    const lastDayNum = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
+    const monthEnd = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(lastDayNum).padStart(2,'0')}`;
+    return {
+      today: dateToStr(now),
+      weekStart: dateToStr(monday),
+      weekEnd: dateToStr(sunday),
+      monthStart, monthEnd,
+      daysLeftInWeek: 7 - dowMonBased,
+      daysLeftInMonth: lastDayNum - now.getDate() + 1,
+    };
+  }
+  let periodBounds = computePeriodBounds();
+
+  function renderHomeHeader(){
+    const now = new Date();
+    document.getElementById('homeDate').textContent =
+      `${WEEKDAYS[now.getDay()]}, ${MONTHS_SHORT[now.getMonth()]} ${now.getDate()}`;
+    const b = periodBounds;
+    const weekWord = b.daysLeftInWeek === 1 ? 'day' : 'days';
+    const monthWord = b.daysLeftInMonth === 1 ? 'day' : 'days';
+    document.getElementById('homeRemaining').textContent =
+      `${b.daysLeftInWeek} ${weekWord} left this week · ${b.daysLeftInMonth} ${monthWord} left this month`;
+  }
+
+  function periodLabel(cadence){
+    return cadence === 'daily' ? 'today' : cadence === 'weekly' ? 'this week' : 'this month';
+  }
+
+  function loggedMinutesFor(activityId, cadence){
+    const b = periodBounds;
+    const start = cadence === 'daily' ? b.today : cadence === 'weekly' ? b.weekStart : b.monthStart;
+    const end = cadence === 'daily' ? b.today : cadence === 'weekly' ? b.weekEnd : b.monthEnd;
+    return periodEntries
+      .filter(e => e.activityId === activityId && e.date >= start && e.date <= end)
+      .reduce((sum, e) => sum + e.durationMinutes, 0);
+  }
+
   // ---------- activities: live list + render ----------
   let currentUid = null;
   let activities = [];        // kept in sync via onSnapshot, used for edit-form lookups
   let unsubscribeActivities = null;
 
+  const CADENCE_ORDER = { daily: 0, weekly: 1, monthly: 2 };
+
   function renderActivities(){
     const list = document.getElementById('activityList');
     list.innerHTML = '';
-    activities.forEach(a => {
+    const sorted = [...activities].sort((a, b) =>
+      CADENCE_ORDER[a.cadence] - CADENCE_ORDER[b.cadence] || a.name.localeCompare(b.name));
+    sorted.forEach(a => {
+      const logged = loggedMinutesFor(a.id, a.cadence);
+      const pct = Math.min(100, Math.round(logged / a.goalMinutes * 100));
+      const done = logged >= a.goalMinutes;
       const li = document.createElement('li');
       li.className = 'activity-item';
       li.innerHTML = `
-        <div>
-          <div class="name">${escapeHtml(a.name)}</div>
-          <div class="meta">${cadenceLabel(a.goalMinutes, a.cadence)}</div>
-        </div>
-        <div class="item-right">
-          <span class="cadence-tag ${a.cadence}">${a.cadence}</span>
-          <div class="item-actions">
-            <button class="icon-btn edit-btn" data-id="${a.id}" title="Edit" type="button">✎</button>
-            <button class="icon-btn danger delete-btn" data-id="${a.id}" title="Delete" type="button">✕</button>
+        <div class="activity-item-top">
+          <div>
+            <div class="name">${escapeHtml(a.name)}</div>
+            <div class="meta">${logged} / ${a.goalMinutes} min ${periodLabel(a.cadence)}${done ? ' ✓' : ''}</div>
+          </div>
+          <div class="item-right">
+            <span class="cadence-tag ${a.cadence}">${a.cadence}</span>
+            <div class="item-actions">
+              <button class="icon-btn edit-btn" data-id="${a.id}" title="Edit" type="button">✎</button>
+              <button class="icon-btn danger delete-btn" data-id="${a.id}" title="Delete" type="button">✕</button>
+            </div>
           </div>
         </div>
+        <div class="progress-track"><div class="progress-fill${done ? ' is-done' : ''}" style="width:${pct}%"></div></div>
       `;
       list.appendChild(li);
     });
@@ -183,7 +232,6 @@
 
   function startActivitiesListener(uid){
     if(unsubscribeActivities) unsubscribeActivities();
-    const connEl = document.getElementById('statusConn');
     unsubscribeActivities = activitiesCol(uid).orderBy('createdAt').onSnapshot(
       snap => {
         activities = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -191,11 +239,10 @@
         populateActivitySelect(document.getElementById('logActivityId'));
         populateActivitySelect(document.getElementById('timerActivityId'));
         renderTimerBanner(); // activity names/goal may have changed
-        setStatus(connEl, `Firestore connected — ${activities.length} activities`, 'ok');
       },
       err => {
         console.error('activities listener failed', err);
-        setStatus(connEl, 'Firestore connection failed — see console', 'err');
+        showConnectionError('Firestore connection failed — see console.');
       }
     );
   }
@@ -329,6 +376,28 @@
         renderTimeEntries();
       },
       err => console.error('time entries listener failed', err)
+    );
+  }
+
+  // ---------- period entries: powers the home-screen progress bars ----------
+  // Separate from the "recent 15" feed above — this pulls every entry from
+  // the earlier of this week's or this month's start, since a week can span
+  // two calendar months (e.g. a Monday in late July for an early-August
+  // "today"). That's enough range to compute daily/weekly/monthly totals.
+  let periodEntries = [];
+  let unsubscribePeriodEntries = null;
+
+  function startPeriodEntriesListener(uid){
+    if(unsubscribePeriodEntries) unsubscribePeriodEntries();
+    periodBounds = computePeriodBounds();
+    renderHomeHeader();
+    const earliest = periodBounds.weekStart < periodBounds.monthStart ? periodBounds.weekStart : periodBounds.monthStart;
+    unsubscribePeriodEntries = timeEntriesCol(uid).where('date', '>=', earliest).onSnapshot(
+      snap => {
+        periodEntries = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        renderActivities();
+      },
+      err => console.error('period entries listener failed', err)
     );
   }
 
@@ -615,27 +684,27 @@
       currentUid = user.uid;
       document.getElementById('screen-signin').hidden = true;
       document.getElementById('appShell').hidden = false;
-      document.getElementById('statusUser').textContent = `Signed in as ${user.email}`;
-
-      const connEl = document.getElementById('statusConn');
-      setStatus(connEl, 'Checking Firestore connection…');
+      showConnectionError(null);
       try{
         await seedActivitiesIfEmpty(user.uid);
         await ensureSettingsDoc(user.uid);
         startActivitiesListener(user.uid);
         startTimeEntriesListener(user.uid);
+        startPeriodEntriesListener(user.uid);
         startTimerListener(user.uid);
       }catch(e){
         console.error('Firestore check failed', e);
-        setStatus(connEl, 'Firestore connection failed — see console', 'err');
+        showConnectionError('Firestore connection failed — see console.');
       }
     } else {
       currentUid = null;
       activities = [];
       timeEntries = [];
+      periodEntries = [];
       activeTimer = null;
       if(unsubscribeActivities){ unsubscribeActivities(); unsubscribeActivities = null; }
       if(unsubscribeTimeEntries){ unsubscribeTimeEntries(); unsubscribeTimeEntries = null; }
+      if(unsubscribePeriodEntries){ unsubscribePeriodEntries(); unsubscribePeriodEntries = null; }
       if(unsubscribeTimer){ unsubscribeTimer(); unsubscribeTimer = null; }
       if(timerTickHandle){ clearInterval(timerTickHandle); timerTickHandle = null; }
       closeActivityForm();
