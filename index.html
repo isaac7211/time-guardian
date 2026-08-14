@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1b211f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Tend">
+<title>Tend</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- SIGN-IN SCREEN -->
+  <main id="screen-signin" class="signin-screen">
+    <div class="signin-card">
+      <div class="wordmark">Tend</div>
+      <div class="signin-sub">Sign in to sync your activities across your devices.</div>
+      <button class="btn-primary" id="googleSigninBtn">Sign in with Google</button>
+      <div class="signin-error" id="signinError" hidden></div>
+    </div>
+  </main>
+
+  <!-- STEP 1-2 SCREEN (placeholder — replaced by the real home screen in a
+       later step). Currently: connection status + full Activities CRUD. -->
+  <div id="appShell" hidden>
+    <header>
+      <div class="wordmark">Tend</div>
+      <button class="btn-pill-icon" id="signoutBtn">Sign out</button>
+    </header>
+
+    <!-- Persistent timer banner — visible whenever a timer is running,
+         sticks to the top of the viewport on scroll. -->
+    <div id="timerBanner" class="timer-banner" hidden>
+      <div class="timer-banner-row">
+        <div>
+          <div class="timer-banner-activity" id="timerActivityName">—</div>
+          <div class="timer-banner-sub" id="timerStartedLabel">started —</div>
+        </div>
+        <div class="timer-banner-right">
+          <div class="timer-banner-elapsed" id="timerElapsed">0:00</div>
+          <button class="btn-primary timer-stop-btn" id="stopTimerBtn" type="button">Stop</button>
+        </div>
+      </div>
+      <div class="timer-banner-warning" id="timerWarning" hidden>This has been running a while — did you forget to stop it?</div>
+    </div>
+
+    <div id="statusPanel" class="status-panel">
+      <div class="status-line" id="statusUser">Signed in as —</div>
+      <div class="status-line" id="statusConn">Checking Firestore connection…</div>
+    </div>
+
+    <div class="section-block">
+      <div class="section-header-row">
+        <h2 class="section-title">Timer</h2>
+      </div>
+      <div id="timerStartPanel" class="activity-form">
+        <label class="form-label">Activity
+          <select id="timerActivityId" class="form-input"></select>
+        </label>
+        <button class="btn-primary" id="startTimerBtn" type="button">Start Timer</button>
+      </div>
+    </div>
+
+    <div class="section-block">
+      <div class="section-header-row">
+        <h2 class="section-title">Log Time</h2>
+        <button class="btn-pill-icon" id="logTimeBtn">+ Log Time</button>
+      </div>
+
+      <!-- Manual time-entry form, hidden until "+ Log Time" is clicked -->
+      <form id="logTimeForm" class="activity-form" hidden>
+        <label class="form-label">Activity
+          <select id="logActivityId" class="form-input" required></select>
+        </label>
+
+        <div class="mode-toggle">
+          <button type="button" class="mode-btn is-active" id="modeDurationBtn">Duration</button>
+          <button type="button" class="mode-btn" id="modeStartEndBtn">Start / end time</button>
+        </div>
+
+        <label class="form-label" id="durationField">Duration (minutes)
+          <input type="number" id="logDuration" class="form-input" min="1" step="1" placeholder="e.g. 45">
+        </label>
+
+        <div id="startEndFields" hidden>
+          <label class="form-label">Start time
+            <input type="time" id="logStartTime" class="form-input">
+          </label>
+          <label class="form-label">End time
+            <input type="time" id="logEndTime" class="form-input">
+          </label>
+        </div>
+
+        <label class="form-label">Date
+          <input type="date" id="logDate" class="form-input" required>
+        </label>
+
+        <div class="form-error" id="logFormError" hidden></div>
+        <div class="form-actions">
+          <button type="submit" class="btn-primary" id="logSaveBtn">Save</button>
+          <button type="button" class="btn-ghost" id="logCancelBtn">Cancel</button>
+        </div>
+      </form>
+
+      <h3 class="section-subtitle">Recent entries</h3>
+      <ul id="timeEntryList" class="activity-list"></ul>
+    </div>
+
+    <div class="section-block">
+      <div class="section-header-row">
+        <h2 class="section-title">Activities</h2>
+        <button class="btn-pill-icon" id="addActivityBtn">+ Add Activity</button>
+      </div>
+
+      <!-- Add/edit form, hidden until "+ Add Activity" or a row's Edit is clicked -->
+      <form id="activityForm" class="activity-form" hidden>
+        <input type="hidden" id="formActivityId" value="">
+        <label class="form-label">Name
+          <input type="text" id="formName" class="form-input" required maxlength="60" placeholder="e.g. Newsletter">
+        </label>
+        <label class="form-label">Cadence
+          <select id="formCadence" class="form-input">
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+          </select>
+        </label>
+        <label class="form-label">Goal (hours)
+          <input type="number" id="formGoalHours" class="form-input" required min="0.25" step="0.25" placeholder="e.g. 1.5">
+        </label>
+        <div class="form-error" id="formError" hidden></div>
+        <div class="form-actions">
+          <button type="submit" class="btn-primary" id="formSaveBtn">Save</button>
+          <button type="button" class="btn-ghost" id="formCancelBtn">Cancel</button>
+        </div>
+      </form>
+
+      <ul id="activityList" class="activity-list"></ul>
+    </div>
+  </div>
+
+  <!-- Stop-timer confirmation — always shown on Stop, never conditional on
+       the duration looking unusual. -->
+  <div id="stopTimerModal" class="modal-backdrop" hidden>
+    <div class="modal-card">
+      <h3 class="modal-title" id="stopModalTitle">Stop timer?</h3>
+      <div class="modal-summary" id="stopModalSummary">—</div>
+      <div class="modal-warning" id="stopModalWarning" hidden>This has been running a while — did you forget to stop it?</div>
+
+      <div id="stopChoiceButtons" class="modal-actions-col">
+        <button class="btn-primary" id="stopKeepBtn" type="button">Keep as-is</button>
+        <button class="btn-ghost" id="stopEditEndBtn" type="button">Edit end time</button>
+        <button class="btn-ghost btn-danger-ghost" id="stopDiscardBtn" type="button">Discard &amp; log manually</button>
+      </div>
+
+      <div id="stopEditEndPanel" class="section-block" hidden>
+        <label class="form-label">End time
+          <input type="time" id="stopEditEndTime" class="form-input">
+        </label>
+        <div class="form-error" id="stopEditEndError" hidden></div>
+        <div class="form-actions">
+          <button class="btn-primary" id="stopEditEndSaveBtn" type="button">Save</button>
+          <button class="btn-ghost" id="stopEditEndBackBtn" type="button">Back</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
