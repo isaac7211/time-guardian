@@ -12,6 +12,8 @@
   --amber-dim: rgba(232,162,75,0.14);
   --coral: #d2694f;
   --coral-dim: rgba(210,105,79,0.14);
+  --blue: #7ea6d9;
+  --blue-dim: rgba(126,166,217,0.14);
 }
 *{box-sizing:border-box;}
 html,body{margin:0;padding:0;}
@@ -182,7 +184,8 @@ header{
   border-radius: 999px;
   transition: width 0.2s;
 }
-.progress-fill.is-done{ background: var(--amber); }
+.progress-fill.is-full{ background: #ffffff; }
+.progress-fill.is-over{ background: var(--blue); }
 .item-actions{ display:flex; gap:4px; }
 .icon-btn{
   background: transparent;

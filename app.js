@@ -196,6 +196,8 @@
       const logged = loggedMinutesFor(a.id, a.cadence);
       const pct = Math.min(100, Math.round(logged / a.goalMinutes * 100));
       const done = logged >= a.goalMinutes;
+      const isDouble = logged >= a.goalMinutes * 2; // well past the goal, not just a few minutes over
+      const fillClass = isDouble ? ' is-over' : done ? ' is-full' : '';
       const li = document.createElement('li');
       li.className = 'activity-item';
       li.innerHTML = `
@@ -212,7 +214,7 @@
             </div>
           </div>
         </div>
-        <div class="progress-track"><div class="progress-fill${done ? ' is-done' : ''}" style="width:${pct}%"></div></div>
+        <div class="progress-track"><div class="progress-fill${fillClass}" style="width:${pct}%"></div></div>
       `;
       list.appendChild(li);
     });
