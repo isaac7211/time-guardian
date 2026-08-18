@@ -28,15 +28,19 @@
   // gettable/settable location while staying under users/{uid}/**, which
   // the existing security rule already covers.
 
+  // scheduleRule: null means "active every week". The one rule type built so
+  // far is { type: "firstFullWeekOfMonth" }; more types can be added later
+  // by extending weekMatchesScheduleRule without touching this shape.
   const SEED_ACTIVITIES = [
-    { name: 'Video ideas & notes',       cadence: 'daily',   goalMinutes: 90 },
-    { name: 'Video recording & editing', cadence: 'daily',   goalMinutes: 90 },
-    { name: 'Newsletter',                cadence: 'weekly',  goalMinutes: 60 },
-    { name: 'ASMR Healing',              cadence: 'weekly',  goalMinutes: 60 },
-    { name: 'Story',                     cadence: 'weekly',  goalMinutes: 60 },
-    { name: 'Household needs',           cadence: 'weekly',  goalMinutes: 60 },
-    { name: 'Learning',                  cadence: 'weekly',  goalMinutes: 60 },
-    { name: 'Budget',                    cadence: 'monthly', goalMinutes: 60 },
+    { name: 'Video ideas & notes',       cadence: 'daily',   goalMinutes: 90, scheduleRule: null },
+    { name: 'Video recording & editing', cadence: 'daily',   goalMinutes: 90, scheduleRule: null },
+    { name: 'Newsletter',                cadence: 'weekly',  goalMinutes: 60, scheduleRule: null },
+    { name: 'ASMR Healing',              cadence: 'weekly',  goalMinutes: 60, scheduleRule: null },
+    { name: 'Story',                     cadence: 'weekly',  goalMinutes: 60, scheduleRule: null },
+    { name: 'Household needs',           cadence: 'weekly',  goalMinutes: 60, scheduleRule: null },
+    { name: 'Learning',                  cadence: 'weekly',  goalMinutes: 60, scheduleRule: null },
+    { name: 'Budget',                    cadence: 'monthly', goalMinutes: 60, scheduleRule: null },
+    { name: 'Budget Review',             cadence: 'weekly',  goalMinutes: 60, scheduleRule: { type: 'firstFullWeekOfMonth' } },
   ];
 
   function activitiesCol(uid){ return db.collection('users').doc(uid).collection('activities'); }
@@ -56,11 +60,30 @@
         name: a.name,
         cadence: a.cadence,
         goalMinutes: a.goalMinutes,
+        scheduleRule: a.scheduleRule,
         active: true,
         createdAt: firebase.firestore.FieldValue.serverTimestamp(),
       });
     });
     await batch.commit();
+  }
+
+  // Adds "Budget Review" to accounts that already existed before this
+  // feature shipped (seedActivitiesIfEmpty only fires for brand-new,
+  // fully-empty accounts). Matches by name, so it's safe to call every
+  // sign-in without duplicating the row.
+  async function ensureBudgetReviewSeeded(uid){
+    const seed = SEED_ACTIVITIES.find(a => a.name === 'Budget Review');
+    const snap = await activitiesCol(uid).where('name', '==', seed.name).limit(1).get();
+    if(!snap.empty) return;
+    await activitiesCol(uid).add({
+      name: seed.name,
+      cadence: seed.cadence,
+      goalMinutes: seed.goalMinutes,
+      scheduleRule: seed.scheduleRule,
+      active: true,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+    });
   }
 
   // Ensures the settings singleton exists with sensible defaults; leaves it
@@ -180,6 +203,35 @@
       .reduce((sum, e) => sum + e.durationMinutes, 0);
   }
 
+  // ---------- scheduled weekly activities ----------
+  // A weekly activity can carry a scheduleRule limiting which week(s) it's
+  // active in. null = every week. Add new rule types as new `case`s in
+  // weekMatchesScheduleRule — the activity doc shape doesn't need to change.
+  function firstFullWeekMondayOfMonth(year, monthIndex){
+    const firstOfMonth = new Date(year, monthIndex, 1);
+    const dowMonBased = (firstOfMonth.getDay() + 6) % 7; // 0=Mon ... 6=Sun
+    const daysUntilMonday = dowMonBased === 0 ? 0 : 7 - dowMonBased;
+    return new Date(year, monthIndex, 1 + daysUntilMonday);
+  }
+
+  function weekMatchesScheduleRule(rule, weekStartDate){
+    if(!rule) return true;
+    switch(rule.type){
+      case 'firstFullWeekOfMonth': {
+        const target = firstFullWeekMondayOfMonth(weekStartDate.getFullYear(), weekStartDate.getMonth());
+        return dateToStr(weekStartDate) === dateToStr(target);
+      }
+      default:
+        return true; // unrecognized rule types stay visible rather than silently vanishing
+    }
+  }
+
+  function isActivityVisibleThisWeek(activity){
+    if(activity.cadence !== 'weekly' || !activity.scheduleRule) return true;
+    const weekStartDate = new Date(periodBounds.weekStart + 'T00:00:00');
+    return weekMatchesScheduleRule(activity.scheduleRule, weekStartDate);
+  }
+
   // ---------- activities: live list + render ----------
   let currentUid = null;
   let activities = [];        // kept in sync via onSnapshot, used for edit-form lookups
@@ -190,8 +242,13 @@
   function renderActivities(){
     const list = document.getElementById('activityList');
     list.innerHTML = '';
-    const sorted = [...activities].sort((a, b) =>
-      CADENCE_ORDER[a.cadence] - CADENCE_ORDER[b.cadence] || a.name.localeCompare(b.name));
+    // Scheduled activities (e.g. Budget Review) are hidden entirely, not
+    // grayed out, in weeks their scheduleRule doesn't match. Once the
+    // Activities management page exists (separate from this home list)
+    // it'll show every activity regardless of this filter.
+    const sorted = [...activities]
+      .filter(isActivityVisibleThisWeek)
+      .sort((a, b) => CADENCE_ORDER[a.cadence] - CADENCE_ORDER[b.cadence] || a.name.localeCompare(b.name));
     sorted.forEach(a => {
       const logged = loggedMinutesFor(a.id, a.cadence);
       const pct = Math.min(100, Math.round(logged / a.goalMinutes * 100));
@@ -311,7 +368,7 @@
         await activitiesCol(currentUid).doc(id).update({ name, cadence, goalMinutes });
       } else {
         await activitiesCol(currentUid).add({
-          name, cadence, goalMinutes, active: true,
+          name, cadence, goalMinutes, active: true, scheduleRule: null,
           createdAt: firebase.firestore.FieldValue.serverTimestamp(),
         });
       }
@@ -689,6 +746,7 @@
       showConnectionError(null);
       try{
         await seedActivitiesIfEmpty(user.uid);
+        await ensureBudgetReviewSeeded(user.uid);
         await ensureSettingsDoc(user.uid);
         startActivitiesListener(user.uid);
         startTimeEntriesListener(user.uid);
