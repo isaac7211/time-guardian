@@ -744,18 +744,27 @@
       document.getElementById('screen-signin').hidden = true;
       document.getElementById('appShell').hidden = false;
       showConnectionError(null);
-      try{
-        await seedActivitiesIfEmpty(user.uid);
-        await ensureBudgetReviewSeeded(user.uid);
-        await ensureSettingsDoc(user.uid);
-        startActivitiesListener(user.uid);
-        startTimeEntriesListener(user.uid);
-        startPeriodEntriesListener(user.uid);
-        startTimerListener(user.uid);
-      }catch(e){
-        console.error('Firestore check failed', e);
-        showConnectionError('Firestore connection failed — see console.');
-      }
+
+      // Listeners start immediately — they don't need seeding to finish
+      // first, since a live onSnapshot naturally picks up seed writes
+      // whenever they land. Blocking on three sequential seed-check round
+      // trips before the list could even start loading was adding real,
+      // needless delay.
+      startActivitiesListener(user.uid);
+      startTimeEntriesListener(user.uid);
+      startPeriodEntriesListener(user.uid);
+      startTimerListener(user.uid);
+
+      (async ()=>{
+        try{
+          await seedActivitiesIfEmpty(user.uid);
+          await ensureBudgetReviewSeeded(user.uid); // sequenced after: avoids racing a duplicate write on brand-new accounts
+          await ensureSettingsDoc(user.uid);
+        }catch(e){
+          console.error('Firestore seeding failed', e);
+          showConnectionError('Firestore connection failed — see console.');
+        }
+      })();
     } else {
       currentUid = null;
       activities = [];
