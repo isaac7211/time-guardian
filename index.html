@@ -26,16 +26,20 @@
     </div>
   </main>
 
-  <!-- STEP 1-2 SCREEN (placeholder — replaced by the real home screen in a
-       later step). Currently: connection status + full Activities CRUD. -->
   <div id="appShell" hidden>
     <header>
-      <div class="wordmark">Tend</div>
-      <button class="btn-pill-icon" id="signoutBtn">Sign out</button>
+      <div class="wordmark" id="homeLink" role="button" tabindex="0">Tend</div>
+      <button class="icon-btn-lg" id="settingsNavBtn" title="Settings" type="button">⚙</button>
     </header>
 
-    <!-- Persistent timer banner — visible whenever a timer is running,
-         sticks to the top of the viewport on scroll. -->
+    <nav class="page-nav">
+      <button class="nav-btn" data-page="logtime" type="button">Log Time</button>
+      <button class="nav-btn" data-page="history" type="button">History</button>
+      <button class="nav-btn" data-page="activities" type="button">Activities</button>
+    </nav>
+
+    <!-- Persistent timer banner — visible on every page whenever a timer is
+         running, sticks to the top of the viewport on scroll. -->
     <div id="timerBanner" class="timer-banner" hidden>
       <div class="timer-banner-row">
         <div>
@@ -52,69 +56,17 @@
 
     <div class="status-line err" id="connectionError" hidden></div>
 
-    <div class="home-header">
-      <div class="home-date" id="homeDate">—</div>
-      <div class="home-remaining" id="homeRemaining">—</div>
-    </div>
-
-    <div class="section-block">
-      <div class="section-header-row">
-        <h2 class="section-title">Timer</h2>
+    <!-- PAGE: HOME -->
+    <section id="page-home" class="page">
+      <div class="home-header">
+        <div class="home-date" id="homeDate">—</div>
+        <div class="home-remaining" id="homeRemaining">—</div>
       </div>
-      <div id="timerStartPanel" class="activity-form">
-        <label class="form-label">Activity
-          <select id="timerActivityId" class="form-input"></select>
-        </label>
-        <button class="btn-primary" id="startTimerBtn" type="button">Start Timer</button>
-      </div>
-    </div>
+      <ul id="homeActivityList" class="activity-list"></ul>
+    </section>
 
-    <div class="section-block">
-      <div class="section-header-row">
-        <h2 class="section-title">Log Time</h2>
-        <button class="btn-pill-icon" id="logTimeBtn">+ Log Time</button>
-      </div>
-
-      <!-- Manual time-entry form, hidden until "+ Log Time" is clicked -->
-      <form id="logTimeForm" class="activity-form" hidden>
-        <label class="form-label">Activity
-          <select id="logActivityId" class="form-input" required></select>
-        </label>
-
-        <div class="mode-toggle">
-          <button type="button" class="mode-btn is-active" id="modeDurationBtn">Duration</button>
-          <button type="button" class="mode-btn" id="modeStartEndBtn">Start / end time</button>
-        </div>
-
-        <label class="form-label" id="durationField">Duration (minutes)
-          <input type="number" id="logDuration" class="form-input" min="1" step="1" placeholder="e.g. 45">
-        </label>
-
-        <div id="startEndFields" hidden>
-          <label class="form-label">Start time
-            <input type="time" id="logStartTime" class="form-input">
-          </label>
-          <label class="form-label">End time
-            <input type="time" id="logEndTime" class="form-input">
-          </label>
-        </div>
-
-        <label class="form-label">Date
-          <input type="date" id="logDate" class="form-input" required>
-        </label>
-
-        <div class="form-error" id="logFormError" hidden></div>
-        <div class="form-actions">
-          <button type="submit" class="btn-primary" id="logSaveBtn">Save</button>
-          <button type="button" class="btn-ghost" id="logCancelBtn">Cancel</button>
-        </div>
-      </form>
-
-      <h3 class="section-subtitle">Recent entries</h3>
-      <ul id="timeEntryList" class="activity-list"></ul>
-    </div>
-
-    <div class="section-block">
+    <!-- PAGE: ACTIVITIES -->
+    <section id="page-activities" class="page" hidden>
       <div class="section-header-row">
         <h2 class="section-title">Activities</h2>
         <button class="btn-pill-icon" id="addActivityBtn">+ Add Activity</button>
@@ -144,11 +96,67 @@
       </form>
 
       <ul id="activityList" class="activity-list"></ul>
-    </div>
+    </section>
+
+    <!-- PAGE: LOG TIME -->
+    <section id="page-logtime" class="page" hidden>
+      <h2 class="section-title">Log Time</h2>
+
+      <form id="logTimeForm" class="activity-form">
+        <label class="form-label">Activity
+          <select id="logActivityId" class="form-input" required></select>
+        </label>
+
+        <div class="mode-toggle">
+          <button type="button" class="mode-btn is-active" id="modeDurationBtn">Duration</button>
+          <button type="button" class="mode-btn" id="modeStartEndBtn">Start / end time</button>
+        </div>
+
+        <label class="form-label" id="durationField">Duration (minutes)
+          <input type="number" id="logDuration" class="form-input" min="1" step="1" placeholder="e.g. 45">
+        </label>
+
+        <div id="startEndFields" hidden>
+          <label class="form-label">Start time
+            <input type="time" id="logStartTime" class="form-input">
+          </label>
+          <label class="form-label">End time
+            <input type="time" id="logEndTime" class="form-input">
+          </label>
+        </div>
+
+        <label class="form-label">Date
+          <input type="date" id="logDate" class="form-input" required>
+        </label>
+
+        <div class="form-error" id="logFormError" hidden></div>
+        <div class="form-actions">
+          <button type="submit" class="btn-primary" id="logSaveBtn">Save</button>
+        </div>
+      </form>
+
+      <h3 class="section-subtitle">Logged sessions</h3>
+      <ul id="timeEntryList" class="activity-list"></ul>
+    </section>
+
+    <!-- PAGE: HISTORY -->
+    <section id="page-history" class="page" hidden>
+      <h2 class="section-title">History</h2>
+      <div id="historyEmpty" class="empty-note" hidden>No completed weeks yet.</div>
+      <div id="historyScroll" class="history-scroll">
+        <table class="history-table" id="historyTable"></table>
+      </div>
+    </section>
+
+    <!-- PAGE: SETTINGS -->
+    <section id="page-settings" class="page" hidden>
+      <h2 class="section-title">Settings</h2>
+      <button class="btn-ghost btn-block" id="signoutBtn" type="button">Sign out</button>
+    </section>
   </div>
 
   <!-- Stop-timer confirmation — always shown on Stop, never conditional on
-       the duration looking unusual. -->
+       the duration looking unusual. Global overlay, reachable from any page. -->
   <div id="stopTimerModal" class="modal-backdrop" hidden>
     <div class="modal-card">
       <h3 class="modal-title" id="stopModalTitle">Stop timer?</h3>

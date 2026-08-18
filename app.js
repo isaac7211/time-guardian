@@ -107,6 +107,11 @@
     return (hrs % 1 === 0 ? hrs : hrs.toFixed(2).replace(/0+$/,'').replace(/\.$/,''));
   }
 
+  function goalLabel(goalMinutes, cadence){
+    const per = cadence === 'daily' ? 'day' : cadence === 'weekly' ? 'week' : 'month';
+    return `${fmtHours(goalMinutes)} hr / ${per}`;
+  }
+
   function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
   const WEEKDAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
@@ -124,6 +129,12 @@
   // instead of UTC, so the weekday matches the calendar date the user picked.
   function weekdayFromDateStr(dateStr){
     return WEEKDAYS[new Date(dateStr + 'T00:00:00').getDay()];
+  }
+  function mondayOfDateStr(dateStr){
+    const d = new Date(dateStr + 'T00:00:00');
+    const dowMonBased = (d.getDay() + 6) % 7;
+    d.setDate(d.getDate() - dowMonBased);
+    return d;
   }
   function nowTimeStr(){
     const d = new Date();
@@ -185,9 +196,8 @@
       `${WEEKDAYS[now.getDay()]}, ${MONTHS_SHORT[now.getMonth()]} ${now.getDate()}`;
     const b = periodBounds;
     const weekWord = b.daysLeftInWeek === 1 ? 'day' : 'days';
-    const monthWord = b.daysLeftInMonth === 1 ? 'day' : 'days';
     document.getElementById('homeRemaining').textContent =
-      `${b.daysLeftInWeek} ${weekWord} left this week · ${b.daysLeftInMonth} ${monthWord} left this month`;
+      `${b.daysLeftInWeek} ${weekWord} left this week`;
   }
 
   function periodLabel(cadence){
@@ -232,36 +242,89 @@
     return weekMatchesScheduleRule(activity.scheduleRule, weekStartDate);
   }
 
-  // ---------- activities: live list + render ----------
-  let currentUid = null;
-  let activities = [];        // kept in sync via onSnapshot, used for edit-form lookups
-  let unsubscribeActivities = null;
+  function scheduleRuleLabel(rule){
+    if(rule.type === 'firstFullWeekOfMonth') return 'Only in the first full week of the month';
+    return 'Scheduled';
+  }
 
+  // ---------- shared activity state ----------
+  let currentUid = null;
+  let activities = [];        // kept in sync via onSnapshot
+  let unsubscribeActivities = null;
   const CADENCE_ORDER = { daily: 0, weekly: 1, monthly: 2 };
 
-  function renderActivities(){
-    const list = document.getElementById('activityList');
+  function sortedActivities(){
+    return [...activities].sort((a, b) =>
+      CADENCE_ORDER[a.cadence] - CADENCE_ORDER[b.cadence] || a.name.localeCompare(b.name));
+  }
+
+  function activityName(activityId){
+    const a = activities.find(x => x.id === activityId);
+    return a ? a.name : '(deleted activity)';
+  }
+
+  function populateActivitySelect(sel){
+    const prevValue = sel.value;
+    sel.innerHTML = activities.map(a => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('');
+    if(activities.some(a => a.id === prevValue)) sel.value = prevValue;
+  }
+
+  // ---------- PAGE: HOME ----------
+  // Deliberately minimal per row: name, progress, a Timer button. No
+  // cadence tag, no edit/delete — those live on the Activities page.
+  function renderHomeActivities(){
+    const list = document.getElementById('homeActivityList');
     list.innerHTML = '';
-    // Scheduled activities (e.g. Budget Review) are hidden entirely, not
-    // grayed out, in weeks their scheduleRule doesn't match. Once the
-    // Activities management page exists (separate from this home list)
-    // it'll show every activity regardless of this filter.
-    const sorted = [...activities]
-      .filter(isActivityVisibleThisWeek)
-      .sort((a, b) => CADENCE_ORDER[a.cadence] - CADENCE_ORDER[b.cadence] || a.name.localeCompare(b.name));
-    sorted.forEach(a => {
+    const visible = sortedActivities().filter(isActivityVisibleThisWeek);
+    visible.forEach(a => {
       const logged = loggedMinutesFor(a.id, a.cadence);
       const pct = Math.min(100, Math.round(logged / a.goalMinutes * 100));
       const done = logged >= a.goalMinutes;
-      const isDouble = logged >= a.goalMinutes * 2; // well past the goal, not just a few minutes over
+      const isDouble = logged >= a.goalMinutes * 2;
       const fillClass = isDouble ? ' is-over' : done ? ' is-full' : '';
       const li = document.createElement('li');
-      li.className = 'activity-item';
+      li.className = 'activity-item home-activity-item';
       li.innerHTML = `
         <div class="activity-item-top">
           <div>
             <div class="name">${escapeHtml(a.name)}</div>
             <div class="meta">${logged} / ${a.goalMinutes} min ${periodLabel(a.cadence)}${done ? ' ✓' : ''}</div>
+          </div>
+          <button class="btn-pill-icon timer-row-btn" data-id="${a.id}" type="button"${activeTimer ? ' disabled' : ''}>▶ Timer</button>
+        </div>
+        <div class="progress-track"><div class="progress-fill${fillClass}" style="width:${pct}%"></div></div>
+      `;
+      list.appendChild(li);
+    });
+  }
+
+  document.getElementById('homeActivityList').addEventListener('click', async (e)=>{
+    const btn = e.target.closest('.timer-row-btn');
+    if(!btn || btn.disabled || !currentUid || activeTimer) return;
+    try{
+      await metaDoc(currentUid, 'activeTimer').set({ activityId: btn.dataset.id, startTime: Date.now() });
+    }catch(err){
+      console.error('start timer failed', err);
+      alert('Could not start timer — see console.');
+    }
+  });
+
+  // ---------- PAGE: ACTIVITIES (management — shows every activity,
+  // regardless of this week's scheduled visibility) ----------
+  function renderActivitiesPage(){
+    const list = document.getElementById('activityList');
+    list.innerHTML = '';
+    sortedActivities().forEach(a => {
+      const li = document.createElement('li');
+      li.className = 'activity-item';
+      const scheduleNote = a.scheduleRule
+        ? `<div class="schedule-note">${escapeHtml(scheduleRuleLabel(a.scheduleRule))}</div>` : '';
+      li.innerHTML = `
+        <div class="activity-item-top">
+          <div>
+            <div class="name">${escapeHtml(a.name)}</div>
+            <div class="meta">${goalLabel(a.goalMinutes, a.cadence)}</div>
+            ${scheduleNote}
           </div>
           <div class="item-right">
             <span class="cadence-tag ${a.cadence}">${a.cadence}</span>
@@ -271,7 +334,6 @@
             </div>
           </div>
         </div>
-        <div class="progress-track"><div class="progress-fill${fillClass}" style="width:${pct}%"></div></div>
       `;
       list.appendChild(li);
     });
@@ -294,22 +356,17 @@
     unsubscribeActivities = activitiesCol(uid).orderBy('createdAt').onSnapshot(
       snap => {
         activities = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        renderActivities();
+        renderHomeActivities();
+        renderActivitiesPage();
         populateActivitySelect(document.getElementById('logActivityId'));
-        populateActivitySelect(document.getElementById('timerActivityId'));
         renderTimerBanner(); // activity names/goal may have changed
+        if(currentPage === 'history') renderHistoryPage();
       },
       err => {
         console.error('activities listener failed', err);
         showConnectionError('Firestore connection failed — see console.');
       }
     );
-  }
-
-  function populateActivitySelect(sel){
-    const prevValue = sel.value;
-    sel.innerHTML = activities.map(a => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('');
-    if(activities.some(a => a.id === prevValue)) sel.value = prevValue;
   }
 
   // ---------- activity add/edit form ----------
@@ -392,16 +449,11 @@
     }
   }
 
-  // ---------- time entries: live list + render ----------
-  // Most-recently-created 15 entries — a confirmation feed for this build
-  // step, not the full per-activity history (that's the detail view, later).
+  // ---------- PAGE: LOG TIME ----------
+  // Most-recently-created 15 entries — edit/delete per entry comes in the
+  // next build step.
   let timeEntries = [];
   let unsubscribeTimeEntries = null;
-
-  function activityName(activityId){
-    const a = activities.find(x => x.id === activityId);
-    return a ? a.name : '(deleted activity)';
-  }
 
   function renderTimeEntries(){
     const list = document.getElementById('timeEntryList');
@@ -454,9 +506,24 @@
     unsubscribePeriodEntries = timeEntriesCol(uid).where('date', '>=', earliest).onSnapshot(
       snap => {
         periodEntries = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        renderActivities();
+        renderHomeActivities();
       },
       err => console.error('period entries listener failed', err)
+    );
+  }
+
+  // ---------- all-time entries: powers the History page ----------
+  let allEntries = [];
+  let unsubscribeAllEntries = null;
+
+  function startAllEntriesListener(uid){
+    if(unsubscribeAllEntries) unsubscribeAllEntries();
+    unsubscribeAllEntries = timeEntriesCol(uid).onSnapshot(
+      snap => {
+        allEntries = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        if(currentPage === 'history') renderHistoryPage();
+      },
+      err => console.error('all-entries listener failed', err)
     );
   }
 
@@ -490,7 +557,10 @@
   modeDurationBtn.addEventListener('click', ()=> setLogMode('duration'));
   modeStartEndBtn.addEventListener('click', ()=> setLogMode('startEnd'));
 
-  function openLogTimeForm(presetActivityId){
+  // Resets the Log Time form to fresh defaults — called every time the page
+  // is navigated to, not just once, since there's no separate open/close
+  // step anymore (the page itself is the "open" state).
+  function resetLogTimeForm(presetActivityId){
     setLogFormError(null);
     setLogMode('duration');
     logDurationEl.value = '';
@@ -499,15 +569,7 @@
     logDateEl.value = todayDateStr();
     if(presetActivityId && activities.some(a => a.id === presetActivityId)) logActivityEl.value = presetActivityId;
     else if(activities.length) logActivityEl.value = activities[0].id;
-    logFormEl.hidden = false;
   }
-  function closeLogTimeForm(){
-    logFormEl.hidden = true;
-    setLogFormError(null);
-  }
-
-  document.getElementById('logTimeBtn').addEventListener('click', openLogTimeForm);
-  document.getElementById('logCancelBtn').addEventListener('click', closeLogTimeForm);
 
   logFormEl.addEventListener('submit', async (e)=>{
     e.preventDefault();
@@ -544,7 +606,7 @@
         source: 'manual',
         createdAt: firebase.firestore.FieldValue.serverTimestamp(),
       });
-      closeLogTimeForm();
+      resetLogTimeForm();
     }catch(err){
       console.error('save time entry failed', err);
       setLogFormError('Save failed — see console.');
@@ -552,6 +614,89 @@
       saveBtn.disabled = false;
     }
   });
+
+  // ---------- PAGE: HISTORY ----------
+  // Only past, completed weeks — "last week" is the most recent column.
+  // High/low/avg are computed across every applicable week since the
+  // activity was created, not just the columns currently in view.
+  function weekTotalMinutes(activityId, weekMondayStr){
+    const endDate = new Date(weekMondayStr + 'T00:00:00'); endDate.setDate(endDate.getDate() + 6);
+    const end = dateToStr(endDate);
+    return allEntries
+      .filter(e => e.activityId === activityId && e.date >= weekMondayStr && e.date <= end)
+      .reduce((sum, e) => sum + e.durationMinutes, 0);
+  }
+
+  function activityCreatedWeekMonday(activity){
+    if(!activity.createdAt || typeof activity.createdAt.toDate !== 'function') return null;
+    return dateToStr(mondayOfDateStr(dateToStr(activity.createdAt.toDate())));
+  }
+
+  function weekAppliesToActivity(activity, weekMondayStr, createdWeekStr){
+    if(createdWeekStr && weekMondayStr < createdWeekStr) return false;
+    if(activity.cadence !== 'weekly' || !activity.scheduleRule) return true;
+    return weekMatchesScheduleRule(activity.scheduleRule, new Date(weekMondayStr + 'T00:00:00'));
+  }
+
+  function renderHistoryPage(){
+    const tableEl = document.getElementById('historyTable');
+    const emptyEl = document.getElementById('historyEmpty');
+
+    const currentMonday = new Date(periodBounds.weekStart + 'T00:00:00');
+    const lastWeekMonday = new Date(currentMonday); lastWeekMonday.setDate(currentMonday.getDate() - 7);
+    const lastWeekStr = dateToStr(lastWeekMonday);
+
+    if(!allEntries.length){
+      tableEl.innerHTML = '';
+      emptyEl.hidden = false;
+      emptyEl.textContent = 'No completed weeks yet.';
+      return;
+    }
+
+    const earliestEntryDate = allEntries.reduce((min, e) => e.date < min ? e.date : min, allEntries[0].date);
+    const earliestMondayStr = dateToStr(mondayOfDateStr(earliestEntryDate));
+
+    if(earliestMondayStr > lastWeekStr){
+      tableEl.innerHTML = '';
+      emptyEl.hidden = false;
+      emptyEl.textContent = 'No completed weeks yet — check back after this week ends.';
+      return;
+    }
+    emptyEl.hidden = true;
+
+    const weekMondays = [];
+    let cursor = new Date(lastWeekMonday);
+    while(dateToStr(cursor) >= earliestMondayStr){
+      weekMondays.push(dateToStr(cursor));
+      cursor.setDate(cursor.getDate() - 7);
+    }
+
+    let html = '<thead><tr><th class="hist-activity-col">Activity</th><th>High</th><th>Low</th><th>Avg</th>';
+    weekMondays.forEach(w => {
+      const m = new Date(w + 'T00:00:00');
+      html += `<th>${MONTHS_SHORT[m.getMonth()]} ${m.getDate()}</th>`;
+    });
+    html += '</tr></thead><tbody>';
+
+    sortedActivities().forEach(a => {
+      const createdWeekStr = activityCreatedWeekMonday(a);
+      const applicableWeeks = weekMondays.filter(w => weekAppliesToActivity(a, w, createdWeekStr));
+      const totals = applicableWeeks.map(w => weekTotalMinutes(a.id, w));
+      const high = totals.length ? Math.max(...totals) : null;
+      const low = totals.length ? Math.min(...totals) : null;
+      const avg = totals.length ? Math.round(totals.reduce((s, x) => s + x, 0) / totals.length) : null;
+
+      html += `<tr><td class="hist-activity-col">${escapeHtml(a.name)}</td>`;
+      html += `<td>${high === null ? '–' : high}</td><td>${low === null ? '–' : low}</td><td>${avg === null ? '–' : avg}</td>`;
+      weekMondays.forEach(w => {
+        if(!weekAppliesToActivity(a, w, createdWeekStr)){ html += '<td class="hist-na">–</td>'; return; }
+        html += `<td>${weekTotalMinutes(a.id, w)}</td>`;
+      });
+      html += '</tr>';
+    });
+    html += '</tbody>';
+    tableEl.innerHTML = html;
+  }
 
   // ---------- timer: shared state across devices ----------
   // users/{uid}/meta/activeTimer is a single doc; its absence means no
@@ -562,12 +707,10 @@
   let timerTickHandle = null;
 
   const timerBannerEl = document.getElementById('timerBanner');
-  const timerStartPanelEl = document.getElementById('timerStartPanel');
   const timerActivityNameEl = document.getElementById('timerActivityName');
   const timerStartedLabelEl = document.getElementById('timerStartedLabel');
   const timerElapsedEl = document.getElementById('timerElapsed');
   const timerWarningEl = document.getElementById('timerWarning');
-  const timerActivitySelectEl = document.getElementById('timerActivityId');
 
   function isTimerStale(activity, elapsedMs){
     return !!activity && elapsedMs > activity.goalMinutes * 60000 * 2;
@@ -585,14 +728,12 @@
 
   function renderTimerBanner(){
     if(activeTimer){
-      timerStartPanelEl.hidden = true;
       timerBannerEl.hidden = false;
       timerActivityNameEl.textContent = activityName(activeTimer.activityId);
       timerStartedLabelEl.textContent = `started ${fmt12h(msToHHMM(activeTimer.startTime))}`;
       tickTimerBanner();
       if(!timerTickHandle) timerTickHandle = setInterval(tickTimerBanner, 1000);
     } else {
-      timerStartPanelEl.hidden = false;
       timerBannerEl.hidden = true;
       if(timerTickHandle){ clearInterval(timerTickHandle); timerTickHandle = null; }
     }
@@ -604,23 +745,11 @@
       snap => {
         activeTimer = snap.exists ? snap.data() : null;
         renderTimerBanner();
+        renderHomeActivities(); // per-row Timer buttons enable/disable with activeTimer
       },
       err => console.error('timer listener failed', err)
     );
   }
-
-  document.getElementById('startTimerBtn').addEventListener('click', async ()=>{
-    if(!currentUid || !activities.length) return;
-    try{
-      await metaDoc(currentUid, 'activeTimer').set({
-        activityId: timerActivitySelectEl.value,
-        startTime: Date.now(),
-      });
-    }catch(err){
-      console.error('start timer failed', err);
-      alert('Could not start timer — see console.');
-    }
-  });
 
   // ---------- stop-timer confirmation modal ----------
   const stopModalEl = document.getElementById('stopTimerModal');
@@ -711,12 +840,43 @@
     try{
       await metaDoc(currentUid, 'activeTimer').delete();
       closeStopModal();
-      openLogTimeForm(activityId);
+      pendingLogTimePreset = activityId;
+      navigateTo('logtime');
     }catch(err){
       console.error('discard timer failed', err);
       alert('Could not discard — see console.');
     }
   });
+
+  // ---------- page navigation ----------
+  const PAGES = ['home', 'activities', 'logtime', 'history', 'settings'];
+  let currentPage = 'home';
+  let pendingLogTimePreset = null;
+
+  function showPage(page){
+    if(!PAGES.includes(page)) page = 'home';
+    currentPage = page;
+    PAGES.forEach(p => { document.getElementById('page-' + p).hidden = (p !== page); });
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('is-active', b.dataset.page === page));
+    if(page === 'logtime'){
+      resetLogTimeForm(pendingLogTimePreset);
+      pendingLogTimePreset = null;
+    } else if(page === 'history'){
+      renderHistoryPage();
+    }
+  }
+
+  function navigateTo(page){
+    const newHash = page === 'home' ? '' : page;
+    if(location.hash.slice(1) !== newHash) location.hash = newHash;
+    else showPage(page); // hash unchanged, so hashchange won't fire on its own
+  }
+
+  document.getElementById('homeLink').addEventListener('click', ()=> navigateTo('home'));
+  document.getElementById('homeLink').addEventListener('keydown', (e)=>{ if(e.key === 'Enter') navigateTo('home'); });
+  document.getElementById('settingsNavBtn').addEventListener('click', ()=> navigateTo('settings'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.addEventListener('click', ()=> navigateTo(b.dataset.page)));
+  window.addEventListener('hashchange', ()=> showPage(location.hash.slice(1) || 'home'));
 
   // ---------- AUTH ----------
   function setSigninError(msg){
@@ -744,6 +904,7 @@
       document.getElementById('screen-signin').hidden = true;
       document.getElementById('appShell').hidden = false;
       showConnectionError(null);
+      showPage(location.hash.slice(1) || 'home');
 
       // Listeners start immediately — they don't need seeding to finish
       // first, since a live onSnapshot naturally picks up seed writes
@@ -753,6 +914,7 @@
       startActivitiesListener(user.uid);
       startTimeEntriesListener(user.uid);
       startPeriodEntriesListener(user.uid);
+      startAllEntriesListener(user.uid);
       startTimerListener(user.uid);
 
       (async ()=>{
@@ -770,14 +932,15 @@
       activities = [];
       timeEntries = [];
       periodEntries = [];
+      allEntries = [];
       activeTimer = null;
       if(unsubscribeActivities){ unsubscribeActivities(); unsubscribeActivities = null; }
       if(unsubscribeTimeEntries){ unsubscribeTimeEntries(); unsubscribeTimeEntries = null; }
       if(unsubscribePeriodEntries){ unsubscribePeriodEntries(); unsubscribePeriodEntries = null; }
+      if(unsubscribeAllEntries){ unsubscribeAllEntries(); unsubscribeAllEntries = null; }
       if(unsubscribeTimer){ unsubscribeTimer(); unsubscribeTimer = null; }
       if(timerTickHandle){ clearInterval(timerTickHandle); timerTickHandle = null; }
       closeActivityForm();
-      closeLogTimeForm();
       closeStopModal();
       document.getElementById('appShell').hidden = true;
       document.getElementById('screen-signin').hidden = false;
