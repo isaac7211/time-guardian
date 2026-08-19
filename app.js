@@ -54,13 +54,14 @@
     const snap = await activitiesCol(uid).limit(1).get();
     if(!snap.empty) return;
     const batch = db.batch();
-    SEED_ACTIVITIES.forEach(a => {
+    SEED_ACTIVITIES.forEach((a, idx) => {
       const ref = activitiesCol(uid).doc();
       batch.set(ref, {
         name: a.name,
         cadence: a.cadence,
         goalMinutes: a.goalMinutes,
         scheduleRule: a.scheduleRule,
+        sortOrder: idx,
         active: true,
         createdAt: firebase.firestore.FieldValue.serverTimestamp(),
       });
@@ -71,7 +72,8 @@
   // Adds "Budget Review" to accounts that already existed before this
   // feature shipped (seedActivitiesIfEmpty only fires for brand-new,
   // fully-empty accounts). Matches by name, so it's safe to call every
-  // sign-in without duplicating the row.
+  // sign-in without duplicating the row. sortOrder: Date.now() lands it
+  // after any small-integer sortOrder without needing a count query.
   async function ensureBudgetReviewSeeded(uid){
     const seed = SEED_ACTIVITIES.find(a => a.name === 'Budget Review');
     const snap = await activitiesCol(uid).where('name', '==', seed.name).limit(1).get();
@@ -81,9 +83,23 @@
       cadence: seed.cadence,
       goalMinutes: seed.goalMinutes,
       scheduleRule: seed.scheduleRule,
+      sortOrder: Date.now(),
       active: true,
       createdAt: firebase.firestore.FieldValue.serverTimestamp(),
     });
+  }
+
+  // One-time migration for activities created before drag-reordering
+  // existed: assigns sortOrder based on the old cadence+name sort, so
+  // nothing visually jumps the first time this runs. No-ops forever after,
+  // once every activity has a real sortOrder.
+  async function backfillSortOrderIfNeeded(uid, docs){
+    if(!docs.some(d => typeof d.sortOrder !== 'number')) return;
+    const ordered = [...docs].sort((a, b) =>
+      CADENCE_ORDER[a.cadence] - CADENCE_ORDER[b.cadence] || a.name.localeCompare(b.name));
+    const batch = db.batch();
+    ordered.forEach((d, idx) => batch.update(activitiesCol(uid).doc(d.id), { sortOrder: idx }));
+    await batch.commit();
   }
 
   // Ensures the settings singleton exists with sensible defaults; leaves it
@@ -271,9 +287,10 @@
   let unsubscribeActivities = null;
   const CADENCE_ORDER = { daily: 0, weekly: 1, monthly: 2 };
 
+  // User-controlled order (drag-reordered on the home screen), shared across
+  // Home/Activities/History so position stays consistent everywhere.
   function sortedActivities(){
-    return [...activities].sort((a, b) =>
-      CADENCE_ORDER[a.cadence] - CADENCE_ORDER[b.cadence] || a.name.localeCompare(b.name));
+    return [...activities].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
   }
 
   function activityName(activityId){
@@ -288,8 +305,11 @@
   }
 
   // ---------- PAGE: HOME ----------
-  // Deliberately minimal per row: name, progress, a Timer button. No
-  // cadence tag, no edit/delete — those live on the Activities page.
+  // Deliberately minimal per row: name, progress, a Timer button, and a
+  // drag handle for reordering. No cadence tag, no edit/delete — those
+  // live on the Activities page.
+  let homeSortable = null;
+
   function renderHomeActivities(){
     const list = document.getElementById('homeActivityList');
     list.innerHTML = '';
@@ -302,17 +322,44 @@
       const fillClass = isDouble ? ' is-over' : done ? ' is-full' : '';
       const li = document.createElement('li');
       li.className = 'activity-item home-activity-item';
+      li.dataset.id = a.id;
       li.innerHTML = `
         <div class="activity-item-top">
           <div>
             <div class="name">${escapeHtml(a.name)}</div>
             <div class="meta">${logged} / ${a.goalMinutes} min ${periodLabel(a.cadence)}${done ? ' ✓' : ''}</div>
           </div>
-          <button class="btn-pill-icon timer-row-btn" data-id="${a.id}" type="button"${activeTimer ? ' disabled' : ''}>▶ Timer</button>
+          <div class="home-row-right">
+            <button class="btn-pill-icon timer-row-btn" data-id="${a.id}" type="button"${activeTimer ? ' disabled' : ''}>▶ Timer</button>
+            <div class="drag-handle" title="Drag to reorder">⠿</div>
+          </div>
         </div>
         <div class="progress-track"><div class="progress-fill${fillClass}" style="width:${pct}%"></div></div>
       `;
       list.appendChild(li);
+    });
+    initHomeDragSort();
+  }
+
+  // Drag is confined to the handle (not the whole row) so it doesn't fight
+  // the Timer button's tap or normal page scrolling. Re-created after every
+  // render since rebuilding the list's innerHTML tears down the old DOM
+  // nodes Sortable was attached to.
+  function initHomeDragSort(){
+    if(homeSortable){ homeSortable.destroy(); homeSortable = null; }
+    const list = document.getElementById('homeActivityList');
+    if(typeof Sortable === 'undefined' || !list.children.length) return;
+    homeSortable = new Sortable(list, {
+      handle: '.drag-handle',
+      animation: 150,
+      onEnd: async ()=>{
+        if(!currentUid) return;
+        const ids = [...list.children].map(li => li.dataset.id);
+        const batch = db.batch();
+        ids.forEach((id, idx) => batch.update(activitiesCol(currentUid).doc(id), { sortOrder: idx }));
+        try{ await batch.commit(); }
+        catch(err){ console.error('save reorder failed', err); alert('Could not save the new order — see console.'); }
+      },
     });
   }
 
@@ -379,6 +426,7 @@
         populateActivitySelect(document.getElementById('logActivityId'));
         renderTimerBanner(); // activity names/goal may have changed
         if(currentPage === 'history') renderHistoryPage();
+        backfillSortOrderIfNeeded(uid, activities).catch(err => console.error('sortOrder backfill failed', err));
       },
       err => {
         console.error('activities listener failed', err);
@@ -443,7 +491,7 @@
         await activitiesCol(currentUid).doc(id).update({ name, cadence, goalMinutes });
       } else {
         await activitiesCol(currentUid).add({
-          name, cadence, goalMinutes, active: true, scheduleRule: null,
+          name, cadence, goalMinutes, active: true, scheduleRule: null, sortOrder: Date.now(),
           createdAt: firebase.firestore.FieldValue.serverTimestamp(),
         });
       }
@@ -1023,6 +1071,7 @@
       if(unsubscribeTimer){ unsubscribeTimer(); unsubscribeTimer = null; }
       if(timerTickHandle){ clearInterval(timerTickHandle); timerTickHandle = null; }
       if(periodRolloverIntervalHandle){ clearInterval(periodRolloverIntervalHandle); periodRolloverIntervalHandle = null; }
+      if(homeSortable){ homeSortable.destroy(); homeSortable = null; }
       closeActivityForm();
       closeStopModal();
       document.getElementById('appShell').hidden = true;

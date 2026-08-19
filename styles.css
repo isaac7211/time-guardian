@@ -469,3 +469,20 @@ header{
 .home-activity-item{ padding: 16px; }
 .home-activity-item .name{ font-size: 19px; font-weight:600; }
 .home-activity-item .meta{ font-size: 16px; font-weight:500; color: var(--text-dim); margin-top:3px; }
+.home-row-right{ display:flex; align-items:center; gap: 10px; flex-shrink:0; }
+.drag-handle{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  width: 32px;
+  height: 32px;
+  color: var(--text-faint);
+  font-size: 18px;
+  letter-spacing: -2px;
+  cursor: grab;
+  touch-action: none;
+}
+.drag-handle:active{ cursor: grabbing; }
+.home-activity-item.sortable-chosen{ border-color: var(--sage); }
+.home-activity-item.sortable-ghost{ opacity: 0.35; }
+.home-activity-item.sortable-drag{ box-shadow: 0 10px 28px rgba(0,0,0,0.45); }
