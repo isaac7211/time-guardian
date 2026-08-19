@@ -219,7 +219,7 @@ header{
 }
 .activity-item .name{ font-size: 14px; font-weight:500; }
 .activity-item .meta{ font-size: 12px; color: var(--text-faint); margin-top:2px; }
-.activity-item .item-right{
+.activity-item .item-right, .time-entry-item .item-right{
   display:flex;
   align-items:center;
   gap: 8px;

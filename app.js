@@ -450,8 +450,7 @@
   }
 
   // ---------- PAGE: LOG TIME ----------
-  // Most-recently-created 15 entries — edit/delete per entry comes in the
-  // next build step.
+  // Most-recently-created 15 entries, editable/deletable in place.
   let timeEntries = [];
   let unsubscribeTimeEntries = null;
 
@@ -473,10 +472,40 @@
           <div class="name">${escapeHtml(activityName(e.activityId))}</div>
           <div class="meta">${e.date} · ${e.weekday} · ${when} · ${e.durationMinutes} min</div>
         </div>
-        <span class="source-tag">${e.source}</span>
+        <div class="item-right">
+          <span class="source-tag">${e.source}</span>
+          <div class="item-actions">
+            <button class="icon-btn edit-entry-btn" data-id="${e.id}" title="Edit" type="button">✎</button>
+            <button class="icon-btn danger delete-entry-btn" data-id="${e.id}" title="Delete" type="button">✕</button>
+          </div>
+        </div>
       `;
       list.appendChild(li);
     });
+  }
+
+  document.getElementById('timeEntryList').addEventListener('click', (e)=>{
+    const editBtn = e.target.closest('.edit-entry-btn');
+    const delBtn = e.target.closest('.delete-entry-btn');
+    if(editBtn){
+      const entry = timeEntries.find(x => x.id === editBtn.dataset.id);
+      if(entry) openLogTimeFormForEdit(entry);
+    } else if(delBtn){
+      const entry = timeEntries.find(x => x.id === delBtn.dataset.id);
+      if(entry) deleteTimeEntry(entry);
+    }
+  });
+
+  async function deleteTimeEntry(entry){
+    const ok = confirm(`Delete this ${activityName(entry.activityId)} entry? This can't be undone.`);
+    if(!ok) return;
+    try{
+      await timeEntriesCol(currentUid).doc(entry.id).delete();
+      if(logEntryIdEl.value === entry.id) resetLogTimeForm(); // was mid-edit on the now-deleted entry
+    }catch(err){
+      console.error('delete time entry failed', err);
+      alert('Delete failed — see console.');
+    }
   }
 
   function startTimeEntriesListener(uid){
@@ -528,7 +557,11 @@
   }
 
   // ---------- log time form ----------
+  // Doubles as the edit form: logEntryIdEl set = editing that entry
+  // in-place (update, preserving its original source); empty = logging a
+  // new one (add, source: 'manual') — same pattern as the Activities form.
   const logFormEl = document.getElementById('logTimeForm');
+  const logEntryIdEl = document.getElementById('logEntryId');
   const logActivityEl = document.getElementById('logActivityId');
   const logDurationEl = document.getElementById('logDuration');
   const logStartTimeEl = document.getElementById('logStartTime');
@@ -539,6 +572,8 @@
   const startEndFieldsEl = document.getElementById('startEndFields');
   const modeDurationBtn = document.getElementById('modeDurationBtn');
   const modeStartEndBtn = document.getElementById('modeStartEndBtn');
+  const logSaveBtnEl = document.getElementById('logSaveBtn');
+  const logCancelEditBtnEl = document.getElementById('logCancelEditBtn');
   let logMode = 'duration'; // 'duration' | 'startEnd'
 
   function setLogFormError(msg){
@@ -557,10 +592,12 @@
   modeDurationBtn.addEventListener('click', ()=> setLogMode('duration'));
   modeStartEndBtn.addEventListener('click', ()=> setLogMode('startEnd'));
 
-  // Resets the Log Time form to fresh defaults — called every time the page
-  // is navigated to, not just once, since there's no separate open/close
-  // step anymore (the page itself is the "open" state).
+  // Resets the Log Time form to fresh "add a new entry" defaults — called
+  // every time the page is navigated to, and after every successful save.
   function resetLogTimeForm(presetActivityId){
+    logEntryIdEl.value = '';
+    logSaveBtnEl.textContent = 'Save';
+    logCancelEditBtnEl.hidden = true;
     setLogFormError(null);
     setLogMode('duration');
     logDurationEl.value = '';
@@ -570,6 +607,26 @@
     if(presetActivityId && activities.some(a => a.id === presetActivityId)) logActivityEl.value = presetActivityId;
     else if(activities.length) logActivityEl.value = activities[0].id;
   }
+
+  function openLogTimeFormForEdit(entry){
+    logEntryIdEl.value = entry.id;
+    logSaveBtnEl.textContent = 'Update';
+    logCancelEditBtnEl.hidden = false;
+    setLogFormError(null);
+    logActivityEl.value = entry.activityId;
+    logDateEl.value = entry.date;
+    if(entry.startTime && entry.endTime){
+      setLogMode('startEnd');
+      logStartTimeEl.value = entry.startTime;
+      logEndTimeEl.value = entry.endTime;
+    } else {
+      setLogMode('duration');
+      logDurationEl.value = entry.durationMinutes;
+    }
+    logFormEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  logCancelEditBtnEl.addEventListener('click', ()=> resetLogTimeForm());
 
   logFormEl.addEventListener('submit', async (e)=>{
     e.preventDefault();
@@ -594,24 +651,30 @@
       if(durationMinutes <= 0){ setLogFormError('End time must be after start time.'); return; }
     }
 
-    const saveBtn = document.getElementById('logSaveBtn');
-    saveBtn.disabled = true;
+    const editingId = logEntryIdEl.value;
+    logSaveBtnEl.disabled = true;
     try{
-      await timeEntriesCol(currentUid).add({
-        activityId,
-        date,
-        weekday: weekdayFromDateStr(date),
-        startTime, endTime,
-        durationMinutes,
-        source: 'manual',
-        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-      });
+      if(editingId){
+        await timeEntriesCol(currentUid).doc(editingId).update({
+          activityId, date, weekday: weekdayFromDateStr(date), startTime, endTime, durationMinutes,
+        });
+      } else {
+        await timeEntriesCol(currentUid).add({
+          activityId,
+          date,
+          weekday: weekdayFromDateStr(date),
+          startTime, endTime,
+          durationMinutes,
+          source: 'manual',
+          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        });
+      }
       resetLogTimeForm();
     }catch(err){
       console.error('save time entry failed', err);
       setLogFormError('Save failed — see console.');
     }finally{
-      saveBtn.disabled = false;
+      logSaveBtnEl.disabled = false;
     }
   });
 
