@@ -200,6 +200,24 @@
       `${b.daysLeftInWeek} ${weekWord} left this week`;
   }
 
+  // periodBounds is a snapshot of "now" taken when listeners start (sign-in
+  // or reload). Without this check, a tab left open across a day/week
+  // boundary would keep showing the old week's numbers indefinitely —
+  // Home and History are both computed from periodBounds, not from a
+  // separate "finalize the week" write, so refreshing it is what makes a
+  // rollover actually visible.
+  let periodRolloverIntervalHandle = null;
+  function checkForPeriodRollover(){
+    if(!currentUid) return;
+    const fresh = computePeriodBounds();
+    if(fresh.today === periodBounds.today) return; // still the same day
+    periodBounds = fresh;
+    renderHomeHeader();
+    renderHomeActivities();
+    if(currentPage === 'history') renderHistoryPage();
+  }
+  document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) checkForPeriodRollover(); });
+
   function periodLabel(cadence){
     return cadence === 'daily' ? 'today' : cadence === 'weekly' ? 'this week' : 'this month';
   }
@@ -979,6 +997,7 @@
       startPeriodEntriesListener(user.uid);
       startAllEntriesListener(user.uid);
       startTimerListener(user.uid);
+      periodRolloverIntervalHandle = setInterval(checkForPeriodRollover, 60 * 1000);
 
       (async ()=>{
         try{
@@ -1003,6 +1022,7 @@
       if(unsubscribeAllEntries){ unsubscribeAllEntries(); unsubscribeAllEntries = null; }
       if(unsubscribeTimer){ unsubscribeTimer(); unsubscribeTimer = null; }
       if(timerTickHandle){ clearInterval(timerTickHandle); timerTickHandle = null; }
+      if(periodRolloverIntervalHandle){ clearInterval(periodRolloverIntervalHandle); periodRolloverIntervalHandle = null; }
       closeActivityForm();
       closeStopModal();
       document.getElementById('appShell').hidden = true;
