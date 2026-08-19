@@ -176,10 +176,10 @@ header{
 .home-header{ margin-bottom: 22px; }
 .home-date{
   font-family:'Fraunces', serif;
-  font-size: 20px;
+  font-size: 28px;
   font-weight:600;
 }
-.home-remaining{ font-size: 12.5px; color: var(--text-faint); margin-top: 3px; }
+.home-remaining{ font-size: 16px; color: var(--text-faint); margin-top: 4px; }
 .section-title{
   font-family:'Fraunces', serif;
   font-size: 15px;
@@ -466,5 +466,6 @@ header{
 .schedule-note{ font-size: 11.5px; color: var(--text-faint); font-style: italic; margin-top: 2px; }
 
 /* HOME PAGE */
-.home-activity-item .name{ font-size: 16px; }
-.home-activity-item .meta{ font-size: 13.5px; }
+.home-activity-item{ padding: 16px; }
+.home-activity-item .name{ font-size: 19px; font-weight:600; }
+.home-activity-item .meta{ font-size: 16px; font-weight:500; color: var(--text-dim); margin-top:3px; }
