@@ -11,7 +11,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=11">
+<link rel="stylesheet" href="styles.css?v=12">
 </head>
 <body>
 <div id="app">
@@ -107,10 +107,39 @@
       <ul id="activityList" class="activity-list"></ul>
     </section>
 
-    <!-- PAGE: PLANNER (placeholder — named weekly schedules land in a later step) -->
+    <!-- PAGE: PLANNER -->
     <section id="page-planner" class="page" hidden>
-      <h2 class="section-title">Planner</h2>
-      <div class="empty-note">Named weekly schedules are coming in a later step.</div>
+
+      <!-- Sub-view: list of saved schedules -->
+      <div id="plannerListView">
+        <div class="section-header-row">
+          <h2 class="section-title">Planner</h2>
+          <button class="btn-pill-icon" id="addScheduleBtn">+ New Schedule</button>
+        </div>
+
+        <form id="newScheduleForm" class="activity-form" hidden>
+          <label class="form-label">Schedule name
+            <input type="text" id="newScheduleName" class="form-input" required maxlength="60" placeholder="e.g. Heavy Coaching Week">
+          </label>
+          <div class="form-error" id="newScheduleError" hidden></div>
+          <div class="form-actions">
+            <button type="submit" class="btn-primary" id="newScheduleSaveBtn">Create</button>
+            <button type="button" class="btn-ghost" id="newScheduleCancelBtn">Cancel</button>
+          </div>
+        </form>
+
+        <div id="plannerEmpty" class="empty-note" hidden>No saved schedules yet — create one to start planning your week.</div>
+        <ul id="scheduleList" class="activity-list"></ul>
+      </div>
+
+      <!-- Sub-view: editing one schedule's day-part assignments -->
+      <div id="plannerEditView" hidden>
+        <button class="btn-ghost" id="plannerBackBtn" type="button">← Back to schedules</button>
+        <label class="form-label planner-name-label">Schedule name
+          <input type="text" id="scheduleNameInput" class="form-input" maxlength="60">
+        </label>
+        <div id="plannerDays"></div>
+      </div>
     </section>
 
     <!-- PAGE: LOG TIME -->
@@ -199,12 +228,31 @@
     </div>
   </div>
 
+  <!-- Add-assignment modal — reused for every day-part in the Planner
+       editor rather than 21 separate inline forms. -->
+  <div id="assignModal" class="modal-backdrop" hidden>
+    <div class="modal-card">
+      <h3 class="modal-title">Add to <span id="assignModalDayPart">—</span></h3>
+      <label class="form-label">Activity
+        <select id="assignActivityId" class="form-input"></select>
+      </label>
+      <label class="form-label">Target minutes
+        <input type="number" id="assignMinutes" class="form-input" min="1" step="1" placeholder="e.g. 15">
+      </label>
+      <div class="form-error" id="assignFormError" hidden></div>
+      <div class="form-actions">
+        <button type="button" class="btn-primary" id="assignSaveBtn">Add</button>
+        <button type="button" class="btn-ghost" id="assignCancelBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
-<script src="app.js?v=11"></script>
+<script src="app.js?v=12"></script>
 </body>
 </html>

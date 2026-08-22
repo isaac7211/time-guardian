@@ -530,6 +530,250 @@
     }
   }
 
+  // ---------- PAGE: PLANNER ----------
+  // users/{uid}/schedules/{scheduleId}: { name, days, createdAt }
+  // days: { monday: {morning:[], afternoon:[], evening:[]}, ... sunday: {...} }
+  // Each day-part array holds { activityId, minutes } assignments. Day-part
+  // granularity only, per spec — no exact clock times.
+  const DAY_KEYS = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
+  const DAY_LABELS = { monday:'Monday', tuesday:'Tuesday', wednesday:'Wednesday', thursday:'Thursday', friday:'Friday', saturday:'Saturday', sunday:'Sunday' };
+  const DAYPART_KEYS = ['morning','afternoon','evening'];
+  const DAYPART_LABELS = { morning:'Morning', afternoon:'Afternoon', evening:'Evening' };
+
+  function schedulesCol(uid){ return db.collection('users').doc(uid).collection('schedules'); }
+
+  function emptyScheduleDays(){
+    const days = {};
+    DAY_KEYS.forEach(d => { days[d] = { morning: [], afternoon: [], evening: [] }; });
+    return days;
+  }
+  function cloneDays(days){ return JSON.parse(JSON.stringify(days || emptyScheduleDays())); }
+
+  let schedules = [];
+  let unsubscribeSchedules = null;
+  let editingScheduleId = null;
+
+  function startSchedulesListener(uid){
+    if(unsubscribeSchedules) unsubscribeSchedules();
+    unsubscribeSchedules = schedulesCol(uid).orderBy('createdAt').onSnapshot(
+      snap => {
+        schedules = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        renderPlannerList();
+        if(editingScheduleId) renderPlannerEdit();
+      },
+      err => console.error('schedules listener failed', err)
+    );
+  }
+
+  function renderPlannerList(){
+    const list = document.getElementById('scheduleList');
+    const emptyEl = document.getElementById('plannerEmpty');
+    list.innerHTML = '';
+    emptyEl.hidden = schedules.length > 0;
+    schedules.forEach(s => {
+      const li = document.createElement('li');
+      li.className = 'schedule-item';
+      li.innerHTML = `
+        <div class="name">${escapeHtml(s.name)}</div>
+        <div class="item-actions">
+          <button class="icon-btn edit-schedule-btn" data-id="${s.id}" title="Edit" type="button">✎</button>
+          <button class="icon-btn duplicate-schedule-btn" data-id="${s.id}" title="Duplicate" type="button">⧉</button>
+          <button class="icon-btn danger delete-schedule-btn" data-id="${s.id}" title="Delete" type="button">✕</button>
+        </div>
+      `;
+      list.appendChild(li);
+    });
+  }
+
+  document.getElementById('scheduleList').addEventListener('click', (e)=>{
+    const editBtn = e.target.closest('.edit-schedule-btn');
+    const dupBtn = e.target.closest('.duplicate-schedule-btn');
+    const delBtn = e.target.closest('.delete-schedule-btn');
+    if(editBtn) openScheduleEditor(editBtn.dataset.id);
+    else if(dupBtn) duplicateSchedule(dupBtn.dataset.id);
+    else if(delBtn) deleteSchedule(delBtn.dataset.id);
+  });
+
+  function showPlannerListView(){
+    editingScheduleId = null;
+    document.getElementById('plannerListView').hidden = false;
+    document.getElementById('plannerEditView').hidden = true;
+  }
+  function openScheduleEditor(id){
+    editingScheduleId = id;
+    document.getElementById('plannerListView').hidden = true;
+    document.getElementById('plannerEditView').hidden = false;
+    renderPlannerEdit();
+  }
+  document.getElementById('plannerBackBtn').addEventListener('click', showPlannerListView);
+
+  function renderPlannerEdit(){
+    const schedule = schedules.find(s => s.id === editingScheduleId);
+    if(!schedule){ showPlannerListView(); return; }
+    const nameInput = document.getElementById('scheduleNameInput');
+    if(document.activeElement !== nameInput) nameInput.value = schedule.name; // don't clobber while typing
+
+    const daysEl = document.getElementById('plannerDays');
+    daysEl.innerHTML = DAY_KEYS.map(day => {
+      const partsHtml = DAYPART_KEYS.map(part => {
+        const items = (schedule.days && schedule.days[day] && schedule.days[day][part]) || [];
+        const chips = items.map((item, idx) => `
+          <span class="planner-chip">${escapeHtml(activityName(item.activityId))} · ${item.minutes}m
+            <button class="chip-remove" data-day="${day}" data-part="${part}" data-idx="${idx}" title="Remove" type="button">✕</button>
+          </span>
+        `).join('');
+        return `
+          <div class="planner-daypart">
+            <div class="planner-daypart-label">${DAYPART_LABELS[part]}</div>
+            <div class="planner-chips">${chips}</div>
+            <button class="btn-pill-icon planner-add-btn" data-day="${day}" data-part="${part}" type="button">+ Add</button>
+          </div>
+        `;
+      }).join('');
+      return `<div class="planner-day-block"><div class="planner-day-title">${DAY_LABELS[day]}</div>${partsHtml}</div>`;
+    }).join('');
+  }
+
+  document.getElementById('scheduleNameInput').addEventListener('blur', async (e)=>{
+    if(!currentUid) return;
+    const schedule = schedules.find(s => s.id === editingScheduleId);
+    if(!schedule) return;
+    const newName = e.target.value.trim();
+    if(!newName || newName === schedule.name){ e.target.value = schedule.name; return; }
+    try{ await schedulesCol(currentUid).doc(schedule.id).update({ name: newName }); }
+    catch(err){ console.error('rename schedule failed', err); alert('Rename failed — see console.'); e.target.value = schedule.name; }
+  });
+
+  document.getElementById('plannerDays').addEventListener('click', (e)=>{
+    const addBtn = e.target.closest('.planner-add-btn');
+    const removeBtn = e.target.closest('.chip-remove');
+    if(addBtn) openAssignModal(addBtn.dataset.day, addBtn.dataset.part);
+    else if(removeBtn) removeAssignment(removeBtn.dataset.day, removeBtn.dataset.part, parseInt(removeBtn.dataset.idx, 10));
+  });
+
+  async function removeAssignment(day, part, idx){
+    if(!currentUid) return;
+    const schedule = schedules.find(s => s.id === editingScheduleId);
+    if(!schedule) return;
+    const days = cloneDays(schedule.days);
+    days[day][part].splice(idx, 1);
+    try{ await schedulesCol(currentUid).doc(schedule.id).update({ days }); }
+    catch(err){ console.error('remove assignment failed', err); alert('Could not remove — see console.'); }
+  }
+
+  // ---- add-assignment modal: reused for every day-part rather than 21 inline forms ----
+  const assignModalEl = document.getElementById('assignModal');
+  const assignModalDayPartEl = document.getElementById('assignModalDayPart');
+  const assignActivityEl = document.getElementById('assignActivityId');
+  const assignMinutesEl = document.getElementById('assignMinutes');
+  const assignErrorEl = document.getElementById('assignFormError');
+  let assignTargetDay = null, assignTargetPart = null;
+
+  function setAssignError(msg){
+    if(msg){ assignErrorEl.textContent = msg; assignErrorEl.hidden = false; }
+    else { assignErrorEl.hidden = true; assignErrorEl.textContent = ''; }
+  }
+
+  function openAssignModal(day, part){
+    assignTargetDay = day; assignTargetPart = part;
+    assignModalDayPartEl.textContent = `${DAY_LABELS[day]} · ${DAYPART_LABELS[part]}`;
+    populateActivitySelect(assignActivityEl);
+    assignMinutesEl.value = '';
+    setAssignError(null);
+    assignModalEl.hidden = false;
+  }
+  function closeAssignModal(){ assignModalEl.hidden = true; }
+  document.getElementById('assignCancelBtn').addEventListener('click', closeAssignModal);
+
+  document.getElementById('assignSaveBtn').addEventListener('click', async ()=>{
+    if(!currentUid) return;
+    const schedule = schedules.find(s => s.id === editingScheduleId);
+    if(!schedule) return;
+    const activityId = assignActivityEl.value;
+    const minutes = parseInt(assignMinutesEl.value, 10);
+    if(!activityId){ setAssignError('Add an activity first.'); return; }
+    if(!minutes || minutes <= 0){ setAssignError('Enter a positive number of minutes.'); return; }
+    const days = cloneDays(schedule.days);
+    days[assignTargetDay][assignTargetPart].push({ activityId, minutes });
+    try{
+      await schedulesCol(currentUid).doc(schedule.id).update({ days });
+      closeAssignModal();
+    }catch(err){
+      console.error('add assignment failed', err);
+      setAssignError('Save failed — see console.');
+    }
+  });
+
+  // ---- schedule list: create / duplicate / delete ----
+  const newScheduleFormEl = document.getElementById('newScheduleForm');
+  const newScheduleNameEl = document.getElementById('newScheduleName');
+  const newScheduleErrorEl = document.getElementById('newScheduleError');
+
+  function setNewScheduleError(msg){
+    if(msg){ newScheduleErrorEl.textContent = msg; newScheduleErrorEl.hidden = false; }
+    else { newScheduleErrorEl.hidden = true; newScheduleErrorEl.textContent = ''; }
+  }
+
+  document.getElementById('addScheduleBtn').addEventListener('click', ()=>{
+    newScheduleNameEl.value = '';
+    setNewScheduleError(null);
+    newScheduleFormEl.hidden = false;
+    newScheduleNameEl.focus();
+  });
+  document.getElementById('newScheduleCancelBtn').addEventListener('click', ()=>{ newScheduleFormEl.hidden = true; });
+
+  newScheduleFormEl.addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    if(!currentUid) return;
+    const name = newScheduleNameEl.value.trim();
+    if(!name){ setNewScheduleError('Name is required.'); return; }
+    const saveBtn = document.getElementById('newScheduleSaveBtn');
+    saveBtn.disabled = true;
+    try{
+      const ref = await schedulesCol(currentUid).add({
+        name, days: emptyScheduleDays(), createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      });
+      newScheduleFormEl.hidden = true;
+      openScheduleEditor(ref.id);
+    }catch(err){
+      console.error('create schedule failed', err);
+      setNewScheduleError('Save failed — see console.');
+    }finally{
+      saveBtn.disabled = false;
+    }
+  });
+
+  async function duplicateSchedule(id){
+    if(!currentUid) return;
+    const schedule = schedules.find(s => s.id === id);
+    if(!schedule) return;
+    try{
+      await schedulesCol(currentUid).add({
+        name: `${schedule.name} (copy)`,
+        days: cloneDays(schedule.days),
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      });
+    }catch(err){
+      console.error('duplicate schedule failed', err);
+      alert('Duplicate failed — see console.');
+    }
+  }
+
+  async function deleteSchedule(id){
+    if(!currentUid) return;
+    const schedule = schedules.find(s => s.id === id);
+    if(!schedule) return;
+    const ok = confirm(`Delete "${schedule.name}"? This can't be undone.`);
+    if(!ok) return;
+    try{
+      await schedulesCol(currentUid).doc(id).delete();
+      if(editingScheduleId === id) showPlannerListView();
+    }catch(err){
+      console.error('delete schedule failed', err);
+      alert('Delete failed — see console.');
+    }
+  }
+
   // ---------- PAGE: LOG TIME ----------
   // Most-recently-created 15 entries, editable/deletable in place.
   let timeEntries = [];
@@ -1064,6 +1308,8 @@
       pendingLogTimePreset = null;
     } else if(page === 'history'){
       renderHistoryPage();
+    } else if(page === 'planner'){
+      showPlannerListView();
     }
   }
 
@@ -1117,6 +1363,7 @@
       startPeriodEntriesListener(user.uid);
       startAllEntriesListener(user.uid);
       startTimerListener(user.uid);
+      startSchedulesListener(user.uid);
       periodRolloverIntervalHandle = setInterval(checkForPeriodRollover, 60 * 1000);
 
       (async ()=>{
@@ -1136,15 +1383,19 @@
       periodEntries = [];
       allEntries = [];
       activeTimer = null;
+      schedules = [];
+      editingScheduleId = null;
       if(unsubscribeActivities){ unsubscribeActivities(); unsubscribeActivities = null; }
       if(unsubscribeTimeEntries){ unsubscribeTimeEntries(); unsubscribeTimeEntries = null; }
       if(unsubscribePeriodEntries){ unsubscribePeriodEntries(); unsubscribePeriodEntries = null; }
       if(unsubscribeAllEntries){ unsubscribeAllEntries(); unsubscribeAllEntries = null; }
       if(unsubscribeTimer){ unsubscribeTimer(); unsubscribeTimer = null; }
+      if(unsubscribeSchedules){ unsubscribeSchedules(); unsubscribeSchedules = null; }
       if(timerTickHandle){ clearInterval(timerTickHandle); timerTickHandle = null; }
       if(periodRolloverIntervalHandle){ clearInterval(periodRolloverIntervalHandle); periodRolloverIntervalHandle = null; }
       if(homeSortable){ homeSortable.destroy(); homeSortable = null; }
       closeActivityForm();
+      closeAssignModal();
       closeStopModal();
       document.getElementById('appShell').hidden = true;
       document.getElementById('screen-signin').hidden = false;
