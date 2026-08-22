@@ -553,6 +553,32 @@
   let unsubscribeSchedules = null;
   let editingScheduleId = null;
 
+  // Default/favorite schedule: a single pointer on the settings doc rather
+  // than a per-schedule boolean flag, so there's no way for two schedules
+  // to ever both be "the default" and no multi-doc transaction needed to
+  // switch — one field, one write.
+  function settingsDoc(uid){ return metaDoc(uid, 'settings'); }
+  let currentSettings = {};
+  let unsubscribeSettings = null;
+
+  function startSettingsListener(uid){
+    if(unsubscribeSettings) unsubscribeSettings();
+    unsubscribeSettings = settingsDoc(uid).onSnapshot(
+      snap => {
+        currentSettings = snap.exists ? snap.data() : {};
+        renderPlannerList();
+        if(editingScheduleId) renderPlannerEdit();
+      },
+      err => console.error('settings listener failed', err)
+    );
+  }
+
+  async function setDefaultSchedule(id){
+    if(!currentUid || currentSettings.defaultScheduleId === id) return;
+    try{ await settingsDoc(currentUid).set({ defaultScheduleId: id }, { merge: true }); }
+    catch(err){ console.error('set default schedule failed', err); alert('Could not set default — see console.'); }
+  }
+
   function startSchedulesListener(uid){
     if(unsubscribeSchedules) unsubscribeSchedules();
     unsubscribeSchedules = schedulesCol(uid).orderBy('createdAt').onSnapshot(
@@ -571,11 +597,16 @@
     list.innerHTML = '';
     emptyEl.hidden = schedules.length > 0;
     schedules.forEach(s => {
+      const isDefault = currentSettings.defaultScheduleId === s.id;
       const li = document.createElement('li');
       li.className = 'schedule-item';
       li.innerHTML = `
-        <div class="name">${escapeHtml(s.name)}</div>
+        <div>
+          <div class="name">${escapeHtml(s.name)}</div>
+          ${isDefault ? '<div class="schedule-default-label">★ Default</div>' : ''}
+        </div>
         <div class="item-actions">
+          <button class="icon-btn favorite-schedule-btn${isDefault ? ' is-favorite' : ''}" data-id="${s.id}" title="${isDefault ? 'Default schedule' : 'Set as default'}" type="button">${isDefault ? '★' : '☆'}</button>
           <button class="icon-btn edit-schedule-btn" data-id="${s.id}" title="Edit" type="button">✎</button>
           <button class="icon-btn duplicate-schedule-btn" data-id="${s.id}" title="Duplicate" type="button">⧉</button>
           <button class="icon-btn danger delete-schedule-btn" data-id="${s.id}" title="Delete" type="button">✕</button>
@@ -586,10 +617,12 @@
   }
 
   document.getElementById('scheduleList').addEventListener('click', (e)=>{
+    const favBtn = e.target.closest('.favorite-schedule-btn');
     const editBtn = e.target.closest('.edit-schedule-btn');
     const dupBtn = e.target.closest('.duplicate-schedule-btn');
     const delBtn = e.target.closest('.delete-schedule-btn');
-    if(editBtn) openScheduleEditor(editBtn.dataset.id);
+    if(favBtn) setDefaultSchedule(favBtn.dataset.id);
+    else if(editBtn) openScheduleEditor(editBtn.dataset.id);
     else if(dupBtn) duplicateSchedule(dupBtn.dataset.id);
     else if(delBtn) deleteSchedule(delBtn.dataset.id);
   });
@@ -612,6 +645,7 @@
     if(!schedule){ showPlannerListView(); return; }
     const nameInput = document.getElementById('scheduleNameInput');
     if(document.activeElement !== nameInput) nameInput.value = schedule.name; // don't clobber while typing
+    document.getElementById('plannerDefaultBadge').hidden = currentSettings.defaultScheduleId !== schedule.id;
 
     const daysEl = document.getElementById('plannerDays');
     daysEl.innerHTML = DAY_KEYS.map(day => {
@@ -767,6 +801,9 @@
     if(!ok) return;
     try{
       await schedulesCol(currentUid).doc(id).delete();
+      if(currentSettings.defaultScheduleId === id){
+        await settingsDoc(currentUid).set({ defaultScheduleId: null }, { merge: true });
+      }
       if(editingScheduleId === id) showPlannerListView();
     }catch(err){
       console.error('delete schedule failed', err);
@@ -1364,6 +1401,7 @@
       startAllEntriesListener(user.uid);
       startTimerListener(user.uid);
       startSchedulesListener(user.uid);
+      startSettingsListener(user.uid);
       periodRolloverIntervalHandle = setInterval(checkForPeriodRollover, 60 * 1000);
 
       (async ()=>{
@@ -1385,12 +1423,14 @@
       activeTimer = null;
       schedules = [];
       editingScheduleId = null;
+      currentSettings = {};
       if(unsubscribeActivities){ unsubscribeActivities(); unsubscribeActivities = null; }
       if(unsubscribeTimeEntries){ unsubscribeTimeEntries(); unsubscribeTimeEntries = null; }
       if(unsubscribePeriodEntries){ unsubscribePeriodEntries(); unsubscribePeriodEntries = null; }
       if(unsubscribeAllEntries){ unsubscribeAllEntries(); unsubscribeAllEntries = null; }
       if(unsubscribeTimer){ unsubscribeTimer(); unsubscribeTimer = null; }
       if(unsubscribeSchedules){ unsubscribeSchedules(); unsubscribeSchedules = null; }
+      if(unsubscribeSettings){ unsubscribeSettings(); unsubscribeSettings = null; }
       if(timerTickHandle){ clearInterval(timerTickHandle); timerTickHandle = null; }
       if(periodRolloverIntervalHandle){ clearInterval(periodRolloverIntervalHandle); periodRolloverIntervalHandle = null; }
       if(homeSortable){ homeSortable.destroy(); homeSortable = null; }

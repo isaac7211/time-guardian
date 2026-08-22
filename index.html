@@ -11,7 +11,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=12">
+<link rel="stylesheet" href="styles.css?v=13">
 </head>
 <body>
 <div id="app">
@@ -135,6 +135,7 @@
       <!-- Sub-view: editing one schedule's day-part assignments -->
       <div id="plannerEditView" hidden>
         <button class="btn-ghost" id="plannerBackBtn" type="button">← Back to schedules</button>
+        <div class="planner-default-badge" id="plannerDefaultBadge" hidden>★ Your default schedule — edits here apply immediately</div>
         <label class="form-label planner-name-label">Schedule name
           <input type="text" id="scheduleNameInput" class="form-input" maxlength="60">
         </label>
@@ -253,6 +254,6 @@
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
-<script src="app.js?v=12"></script>
+<script src="app.js?v=13"></script>
 </body>
 </html>

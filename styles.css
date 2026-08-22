@@ -558,3 +558,14 @@ header{
   margin-bottom: 8px;
 }
 .schedule-item .name{ font-size: 15px; font-weight:600; }
+.schedule-default-label{ font-size: 11.5px; color: var(--amber); margin-top: 2px; }
+.favorite-schedule-btn{ color: var(--text-faint); }
+.favorite-schedule-btn.is-favorite{ color: var(--amber); border-color: var(--amber); }
+.planner-default-badge{
+  margin-top: 14px;
+  font-size: 12.5px;
+  color: var(--amber);
+  background: var(--amber-dim);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
