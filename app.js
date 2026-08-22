@@ -239,6 +239,7 @@
     periodBounds = fresh;
     renderHomeHeader();
     renderHomeActivities();
+    renderHomePlan(); // the rolling day list shifts/refills as the day changes
     if(currentPage === 'history') renderHistoryPage();
   }
   document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) checkForPeriodRollover(); });
@@ -314,6 +315,39 @@
   }
 
   // ---------- PAGE: HOME ----------
+  // Read-only "this week's plan": the active (default) schedule's remaining
+  // days, today first. As the day advances the list shrinks toward Sunday;
+  // once a new week starts it's back to all 7 days, using whichever
+  // schedule is currently the default (usually the same one, unchanged).
+  function renderHomePlan(){
+    const titleEl = document.getElementById('homePlanTitle');
+    const daysEl = document.getElementById('homePlanDays');
+    const schedule = schedules.find(s => s.id === currentSettings.defaultScheduleId);
+    if(!schedule){
+      titleEl.textContent = "This week's plan";
+      daysEl.innerHTML = '<div class="empty-note">No default schedule set — pick one in Planner.</div>';
+      return;
+    }
+    titleEl.textContent = `This week's plan · ${schedule.name}`;
+    const dowMonBased = (new Date().getDay() + 6) % 7; // 0=Mon ... 6=Sun
+    const remainingDays = DAY_KEYS.slice(dowMonBased);
+    daysEl.innerHTML = remainingDays.map((day, i) => {
+      const isToday = i === 0;
+      const parts = DAYPART_KEYS
+        .map(part => ({ part, items: (schedule.days && schedule.days[day] && schedule.days[day][part]) || [] }))
+        .filter(p => p.items.length);
+      const partsHtml = parts.length
+        ? parts.map(p => `<div class="home-plan-part"><span class="home-plan-part-label">${DAYPART_LABELS[p.part]}:</span> ${p.items.map(it => `${escapeHtml(activityName(it.activityId))} ${it.minutes}m`).join(', ')}</div>`).join('')
+        : '<div class="home-plan-part empty">Nothing planned</div>';
+      return `
+        <div class="home-plan-day">
+          <div class="home-plan-day-title">${DAY_LABELS[day]}${isToday ? '<span class="home-plan-today-tag">Today</span>' : ''}</div>
+          ${partsHtml}
+        </div>
+      `;
+    }).join('');
+  }
+
   // Deliberately minimal per row: name, progress, a Timer button, and a
   // drag handle for reordering. No cadence tag, no edit/delete — those
   // live on the Activities page.
@@ -568,6 +602,7 @@
         currentSettings = snap.exists ? snap.data() : {};
         renderPlannerList();
         if(editingScheduleId) renderPlannerEdit();
+        renderHomePlan();
       },
       err => console.error('settings listener failed', err)
     );
@@ -586,6 +621,7 @@
         schedules = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         renderPlannerList();
         if(editingScheduleId) renderPlannerEdit();
+        renderHomePlan();
       },
       err => console.error('schedules listener failed', err)
     );

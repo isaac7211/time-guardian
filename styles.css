@@ -569,3 +569,28 @@ header{
   border-radius: 8px;
   padding: 8px 10px;
 }
+
+/* HOME PAGE: THIS WEEK'S PLAN (read-only) */
+.home-plan-day{
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 6px;
+}
+.home-plan-day-title{ font-size: 13.5px; font-weight:600; }
+.home-plan-today-tag{
+  font-size: 10px;
+  font-weight:700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--sage);
+  background: var(--sage-dim);
+  border-radius: 999px;
+  padding: 2px 7px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.home-plan-part{ font-size: 12.5px; color: var(--text-dim); margin-top: 3px; }
+.home-plan-part.empty{ color: var(--text-faint); font-style: italic; }
+.home-plan-part-label{ font-weight:600; color: var(--text-faint); }
