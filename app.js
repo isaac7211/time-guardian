@@ -978,7 +978,7 @@
   });
 
   // ---------- page navigation ----------
-  const PAGES = ['home', 'activities', 'logtime', 'history', 'settings'];
+  const PAGES = ['home', 'activities', 'planner', 'logtime', 'history', 'settings'];
   let currentPage = 'home';
   let pendingLogTimePreset = null;
 
@@ -986,7 +986,7 @@
     if(!PAGES.includes(page)) page = 'home';
     currentPage = page;
     PAGES.forEach(p => { document.getElementById('page-' + p).hidden = (p !== page); });
-    document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('is-active', b.dataset.page === page));
+    document.querySelectorAll('.nav-btn, .nav-icon-btn').forEach(b => b.classList.toggle('is-active', b.dataset.page === page));
     if(page === 'logtime'){
       resetLogTimeForm(pendingLogTimePreset);
       pendingLogTimePreset = null;
@@ -1004,7 +1004,7 @@
   document.getElementById('homeLink').addEventListener('click', ()=> navigateTo('home'));
   document.getElementById('homeLink').addEventListener('keydown', (e)=>{ if(e.key === 'Enter') navigateTo('home'); });
   document.getElementById('settingsNavBtn').addEventListener('click', ()=> navigateTo('settings'));
-  document.querySelectorAll('.nav-btn').forEach(b => b.addEventListener('click', ()=> navigateTo(b.dataset.page)));
+  document.querySelectorAll('.nav-btn, .nav-icon-btn').forEach(b => b.addEventListener('click', ()=> navigateTo(b.dataset.page)));
   window.addEventListener('hashchange', ()=> showPage(location.hash.slice(1) || 'home'));
 
   // ---------- AUTH ----------

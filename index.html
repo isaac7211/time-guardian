@@ -11,7 +11,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=9">
+<link rel="stylesheet" href="styles.css?v=10">
 </head>
 <body>
 <div id="app">
@@ -29,13 +29,16 @@
   <div id="appShell" hidden>
     <header>
       <div class="wordmark" id="homeLink" role="button" tabindex="0">Time Guardian</div>
-      <button class="icon-btn-lg" id="settingsNavBtn" title="Settings" type="button">⚙</button>
+      <div class="header-icons">
+        <button class="icon-btn-lg nav-icon-btn" data-page="history" title="History" type="button">📊</button>
+        <button class="icon-btn-lg" id="settingsNavBtn" title="Settings" type="button">⚙</button>
+      </div>
     </header>
 
     <nav class="page-nav">
       <button class="nav-btn" data-page="logtime" type="button">Log Time</button>
-      <button class="nav-btn" data-page="history" type="button">History</button>
       <button class="nav-btn" data-page="activities" type="button">Activities</button>
+      <button class="nav-btn" data-page="planner" type="button">Planner</button>
     </nav>
 
     <!-- Persistent timer banner — visible on every page whenever a timer is
@@ -96,6 +99,12 @@
       </form>
 
       <ul id="activityList" class="activity-list"></ul>
+    </section>
+
+    <!-- PAGE: PLANNER (placeholder — named weekly schedules land in a later step) -->
+    <section id="page-planner" class="page" hidden>
+      <h2 class="section-title">Planner</h2>
+      <div class="empty-note">Named weekly schedules are coming in a later step.</div>
     </section>
 
     <!-- PAGE: LOG TIME -->
@@ -190,6 +199,6 @@
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
-<script src="app.js?v=9"></script>
+<script src="app.js?v=10"></script>
 </body>
 </html>
