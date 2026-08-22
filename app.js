@@ -31,16 +31,22 @@
   // scheduleRule: null means "active every week". The one rule type built so
   // far is { type: "firstFullWeekOfMonth" }; more types can be added later
   // by extending weekMatchesScheduleRule without touching this shape.
+  //
+  // minSessionMinutes drives the countdown-then-count-up timer display: the
+  // fallback (DEFAULT_MIN_SESSION_MINUTES) covers activities created before
+  // this field existed, so no migration was needed for it (unlike sortOrder,
+  // which affects ordering everywhere and so got a real backfill).
+  const DEFAULT_MIN_SESSION_MINUTES = 10;
   const SEED_ACTIVITIES = [
-    { name: 'Video ideas & notes',       cadence: 'daily',   goalMinutes: 90, scheduleRule: null },
-    { name: 'Video recording & editing', cadence: 'daily',   goalMinutes: 90, scheduleRule: null },
-    { name: 'Newsletter',                cadence: 'weekly',  goalMinutes: 60, scheduleRule: null },
-    { name: 'ASMR Healing',              cadence: 'weekly',  goalMinutes: 60, scheduleRule: null },
-    { name: 'Story',                     cadence: 'weekly',  goalMinutes: 60, scheduleRule: null },
-    { name: 'Household needs',           cadence: 'weekly',  goalMinutes: 60, scheduleRule: null },
-    { name: 'Learning',                  cadence: 'weekly',  goalMinutes: 60, scheduleRule: null },
-    { name: 'Budget',                    cadence: 'monthly', goalMinutes: 60, scheduleRule: null },
-    { name: 'Budget Review',             cadence: 'weekly',  goalMinutes: 60, scheduleRule: { type: 'firstFullWeekOfMonth' } },
+    { name: 'Video ideas & notes',       cadence: 'daily',   goalMinutes: 90, scheduleRule: null, minSessionMinutes: 10 },
+    { name: 'Video recording & editing', cadence: 'daily',   goalMinutes: 90, scheduleRule: null, minSessionMinutes: 15 },
+    { name: 'Newsletter',                cadence: 'weekly',  goalMinutes: 60, scheduleRule: null, minSessionMinutes: 10 },
+    { name: 'ASMR Healing',              cadence: 'weekly',  goalMinutes: 60, scheduleRule: null, minSessionMinutes: 10 },
+    { name: 'Story',                     cadence: 'weekly',  goalMinutes: 60, scheduleRule: null, minSessionMinutes: 15 },
+    { name: 'Household needs',           cadence: 'weekly',  goalMinutes: 60, scheduleRule: null, minSessionMinutes: 10 },
+    { name: 'Learning',                  cadence: 'weekly',  goalMinutes: 60, scheduleRule: null, minSessionMinutes: 10 },
+    { name: 'Budget',                    cadence: 'monthly', goalMinutes: 60, scheduleRule: null, minSessionMinutes: 10 },
+    { name: 'Budget Review',             cadence: 'weekly',  goalMinutes: 60, scheduleRule: { type: 'firstFullWeekOfMonth' }, minSessionMinutes: 10 },
   ];
 
   function activitiesCol(uid){ return db.collection('users').doc(uid).collection('activities'); }
@@ -61,6 +67,7 @@
         cadence: a.cadence,
         goalMinutes: a.goalMinutes,
         scheduleRule: a.scheduleRule,
+        minSessionMinutes: a.minSessionMinutes,
         sortOrder: idx,
         active: true,
         createdAt: firebase.firestore.FieldValue.serverTimestamp(),
@@ -83,6 +90,7 @@
       cadence: seed.cadence,
       goalMinutes: seed.goalMinutes,
       scheduleRule: seed.scheduleRule,
+      minSessionMinutes: seed.minSessionMinutes,
       sortOrder: Date.now(),
       active: true,
       createdAt: firebase.firestore.FieldValue.serverTimestamp(),
@@ -123,9 +131,10 @@
     return (hrs % 1 === 0 ? hrs : hrs.toFixed(2).replace(/0+$/,'').replace(/\.$/,''));
   }
 
-  function goalLabel(goalMinutes, cadence){
+  function goalLabel(goalMinutes, cadence, minSessionMinutes){
     const per = cadence === 'daily' ? 'day' : cadence === 'weekly' ? 'week' : 'month';
-    return `${fmtHours(goalMinutes)} hr / ${per}`;
+    const min = minSessionMinutes ?? DEFAULT_MIN_SESSION_MINUTES;
+    return `${fmtHours(goalMinutes)} hr / ${per} · ${min} min min. session`;
   }
 
   function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -366,6 +375,7 @@
   document.getElementById('homeActivityList').addEventListener('click', async (e)=>{
     const btn = e.target.closest('.timer-row-btn');
     if(!btn || btn.disabled || !currentUid || activeTimer) return;
+    primeAudioContext(); // user gesture — needed so the zero-crossing tone can play later
     try{
       await metaDoc(currentUid, 'activeTimer').set({ activityId: btn.dataset.id, startTime: Date.now() });
     }catch(err){
@@ -388,7 +398,7 @@
         <div class="activity-item-top">
           <div>
             <div class="name">${escapeHtml(a.name)}</div>
-            <div class="meta">${goalLabel(a.goalMinutes, a.cadence)}</div>
+            <div class="meta">${goalLabel(a.goalMinutes, a.cadence, a.minSessionMinutes)}</div>
             ${scheduleNote}
           </div>
           <div class="item-right">
@@ -441,6 +451,7 @@
   const formNameEl = document.getElementById('formName');
   const formCadenceEl = document.getElementById('formCadence');
   const formGoalHoursEl = document.getElementById('formGoalHours');
+  const formMinSessionEl = document.getElementById('formMinSession');
   const formErrorEl = document.getElementById('formError');
 
   function setFormError(msg){
@@ -455,11 +466,13 @@
       formNameEl.value = activity.name;
       formCadenceEl.value = activity.cadence;
       formGoalHoursEl.value = fmtHours(activity.goalMinutes);
+      formMinSessionEl.value = activity.minSessionMinutes ?? DEFAULT_MIN_SESSION_MINUTES;
     } else {
       formIdEl.value = '';
       formNameEl.value = '';
       formCadenceEl.value = 'daily';
       formGoalHoursEl.value = '';
+      formMinSessionEl.value = DEFAULT_MIN_SESSION_MINUTES;
     }
     formEl.hidden = false;
     formNameEl.focus();
@@ -479,8 +492,10 @@
     const name = formNameEl.value.trim();
     const cadence = formCadenceEl.value;
     const goalHours = parseFloat(formGoalHoursEl.value);
+    const minSessionMinutes = parseInt(formMinSessionEl.value, 10);
     if(!name){ setFormError('Name is required.'); return; }
     if(!goalHours || goalHours <= 0){ setFormError('Goal must be a positive number of hours.'); return; }
+    if(!minSessionMinutes || minSessionMinutes <= 0){ setFormError('Minimum session must be a positive number of minutes.'); return; }
 
     const goalMinutes = Math.round(goalHours * 60);
     const id = formIdEl.value;
@@ -488,10 +503,10 @@
     saveBtn.disabled = true;
     try{
       if(id){
-        await activitiesCol(currentUid).doc(id).update({ name, cadence, goalMinutes });
+        await activitiesCol(currentUid).doc(id).update({ name, cadence, goalMinutes, minSessionMinutes });
       } else {
         await activitiesCol(currentUid).add({
-          name, cadence, goalMinutes, active: true, scheduleRule: null, sortOrder: Date.now(),
+          name, cadence, goalMinutes, minSessionMinutes, active: true, scheduleRule: null, sortOrder: Date.now(),
           createdAt: firebase.firestore.FieldValue.serverTimestamp(),
         });
       }
@@ -839,17 +854,64 @@
   const timerActivityNameEl = document.getElementById('timerActivityName');
   const timerStartedLabelEl = document.getElementById('timerStartedLabel');
   const timerElapsedEl = document.getElementById('timerElapsed');
+  const timerPhaseLabelEl = document.getElementById('timerPhaseLabel');
   const timerWarningEl = document.getElementById('timerWarning');
 
   function isTimerStale(activity, elapsedMs){
     return !!activity && elapsedMs > activity.goalMinutes * 60000 * 2;
   }
 
+  function minSessionMsFor(activity){
+    return (activity?.minSessionMinutes ?? DEFAULT_MIN_SESSION_MINUTES) * 60000;
+  }
+
+  // Tracks the zero-crossing cue so it fires once per session, in real time
+  // only (not retroactively if the app loads/reconnects after the crossing
+  // already happened).
+  let lastKnownTimerStart = null;
+  let timerCrossedZero = false;
+
+  let audioCtx = null;
+  // Created/resumed from a user gesture (tapping Timer) so browsers don't
+  // block playback later when the cue actually needs to fire.
+  function primeAudioContext(){
+    try{
+      if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if(audioCtx.state === 'suspended') audioCtx.resume();
+    }catch(e){ audioCtx = null; }
+  }
+  function fireZeroCrossingCue(){
+    if(navigator.vibrate) navigator.vibrate(200);
+    if(!audioCtx) return;
+    try{
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
+      osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.4);
+    }catch(e){ console.error('zero-crossing tone failed', e); }
+  }
+
   function tickTimerBanner(){
     if(!activeTimer) return;
     const elapsedMs = Date.now() - activeTimer.startTime;
-    timerElapsedEl.textContent = fmtElapsed(elapsedMs);
     const activity = activities.find(a => a.id === activeTimer.activityId);
+    const minMs = minSessionMsFor(activity);
+    const inCountdown = elapsedMs < minMs;
+
+    timerElapsedEl.textContent = fmtElapsed(inCountdown ? minMs - elapsedMs : elapsedMs - minMs);
+    timerElapsedEl.classList.toggle('is-countdown', inCountdown);
+    timerPhaseLabelEl.textContent = inCountdown ? 'until minimum' : 'past minimum ✓';
+
+    if(!inCountdown && !timerCrossedZero){
+      timerCrossedZero = true;
+      fireZeroCrossingCue();
+    }
+
     const stale = isTimerStale(activity, elapsedMs);
     timerWarningEl.hidden = !stale;
     timerBannerEl.classList.toggle('is-stale', stale);
@@ -873,6 +935,16 @@
     unsubscribeTimer = metaDoc(uid, 'activeTimer').onSnapshot(
       snap => {
         activeTimer = snap.exists ? snap.data() : null;
+        if(activeTimer && activeTimer.startTime !== lastKnownTimerStart){
+          lastKnownTimerStart = activeTimer.startTime;
+          const activity = activities.find(a => a.id === activeTimer.activityId);
+          // If we're just now discovering a timer that's already past its
+          // minimum (e.g. reload, or started on another device a while
+          // ago), mark it crossed without playing the cue retroactively.
+          timerCrossedZero = (Date.now() - activeTimer.startTime) >= minSessionMsFor(activity);
+        } else if(!activeTimer){
+          lastKnownTimerStart = null;
+        }
         renderTimerBanner();
         renderHomeActivities(); // per-row Timer buttons enable/disable with activeTimer
       },
