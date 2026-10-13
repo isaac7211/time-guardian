@@ -426,7 +426,7 @@
     const btn = e.target.closest('.timer-row-btn');
     if(!btn || btn.disabled || !currentUid || activeTimer) return;
     try{
-      await metaDoc(currentUid, 'activeTimer').set({ activityId: btn.dataset.id, startTime: Date.now() });
+      await metaDoc(currentUid, 'activeTimer').set(newTimerDoc(btn.dataset.id));
     }catch(err){
       console.error('start timer failed', err);
       alert('Could not start timer — see console.');
@@ -1171,7 +1171,19 @@
   // users/{uid}/meta/activeTimer is a single doc; its absence means no
   // timer is running. Every signed-in device subscribes to it, so starting
   // on the phone shows the banner on the laptop within a snapshot round trip.
-  let activeTimer = null;   // { activityId, startTime(ms) } | null
+  // Fields:
+  //   activityId
+  //   startTime      ms the session first started (used for the saved entry's
+  //                  date and start time)
+  //   status         'running' | 'paused'
+  //   accumulatedMs  active time banked before the current run segment
+  //   runStartedAt   ms of the last start/resume (null while paused)
+  //   pausedAt       ms the current pause began (null while running)
+  // Active time = accumulatedMs + (now - runStartedAt) while running, or just
+  // accumulatedMs while paused, so paused time never counts and the math
+  // stays correct across refreshes and devices. Docs written before pause
+  // existed only have { activityId, startTime } and are read as running.
+  let activeTimer = null;
   let unsubscribeTimer = null;
   let timerTickHandle = null;
 
@@ -1180,33 +1192,100 @@
   const timerStartedLabelEl = document.getElementById('timerStartedLabel');
   const timerElapsedEl = document.getElementById('timerElapsed');
   const timerWarningEl = document.getElementById('timerWarning');
+  const timerPausedLineEl = document.getElementById('timerPausedLine');
+  const timerRunningActionsEl = document.getElementById('timerRunningActions');
+  const timerPausedActionsEl = document.getElementById('timerPausedActions');
 
-  function isTimerStale(activity, elapsedMs){
-    return !!activity && elapsedMs > activity.goalMinutes * 60000 * 2;
+  function timerStatus(t){ return t.status === 'paused' ? 'paused' : 'running'; }
+  function timerActiveMs(t, now = Date.now()){
+    const banked = t.accumulatedMs ?? 0;
+    if(timerStatus(t) === 'paused') return banked;
+    return banked + Math.max(0, now - (t.runStartedAt ?? t.startTime));
+  }
+  // Total time spent paused so far this session (all pauses added up).
+  function timerPausedMs(t, now = Date.now()){
+    return Math.max(0, (now - t.startTime) - timerActiveMs(t, now));
+  }
+  function newTimerDoc(activityId){
+    const now = Date.now();
+    return { activityId, startTime: now, status: 'running', accumulatedMs: 0, runStartedAt: now, pausedAt: null };
   }
 
-  // Plain count-up: elapsed time since the timer's start timestamp.
+  // Read-modify-write in a transaction so two devices tapping at once can't
+  // corrupt the banked time.
+  async function pauseTimer(){
+    const ref = metaDoc(currentUid, 'activeTimer');
+    await db.runTransaction(async tx => {
+      const snap = await tx.get(ref);
+      if(!snap.exists) return;
+      const t = snap.data();
+      if(timerStatus(t) === 'paused') return;
+      const now = Date.now();
+      tx.update(ref, { status: 'paused', accumulatedMs: timerActiveMs(t, now), runStartedAt: null, pausedAt: now });
+    });
+  }
+  async function resumeTimer(){
+    const ref = metaDoc(currentUid, 'activeTimer');
+    await db.runTransaction(async tx => {
+      const snap = await tx.get(ref);
+      if(!snap.exists) return;
+      const t = snap.data();
+      if(timerStatus(t) !== 'paused') return;
+      tx.update(ref, { status: 'running', runStartedAt: Date.now(), pausedAt: null });
+    });
+  }
+
+  document.getElementById('pauseTimerBtn').addEventListener('click', async ()=>{
+    if(!currentUid || !activeTimer) return;
+    try{ await pauseTimer(); }
+    catch(err){ console.error('pause failed', err); alert('Could not pause — see console.'); }
+  });
+  document.getElementById('resumeTimerBtn').addEventListener('click', async ()=>{
+    if(!currentUid || !activeTimer) return;
+    // Short guard so a fast double-tap on Pause can't land on the Resume
+    // button that replaces it in the same spot.
+    if(activeTimer.pausedAt && Date.now() - activeTimer.pausedAt < 700) return;
+    try{ await resumeTimer(); }
+    catch(err){ console.error('resume failed', err); alert('Could not resume — see console.'); }
+  });
+
+  function isTimerStale(activity, activeMs){
+    return !!activity && activeMs > activity.goalMinutes * 60000 * 2;
+  }
+
   function tickTimerBanner(){
     if(!activeTimer) return;
-    const elapsedMs = Date.now() - activeTimer.startTime;
+    const now = Date.now();
+    const paused = timerStatus(activeTimer) === 'paused';
+    const activeMs = timerActiveMs(activeTimer, now);
     const activity = activities.find(a => a.id === activeTimer.activityId);
 
-    timerElapsedEl.textContent = fmtHMS(elapsedMs);
+    timerElapsedEl.textContent = fmtHMS(activeMs);
+    if(paused){
+      timerPausedLineEl.textContent =
+        `Paused for ${fmtElapsed(timerPausedMs(activeTimer, now))} total — ${fmtElapsed(activeMs)} active so far.`;
+    }
 
-    const stale = isTimerStale(activity, elapsedMs);
+    const stale = !paused && isTimerStale(activity, activeMs);
     timerWarningEl.hidden = !stale;
     timerBannerEl.classList.toggle('is-stale', stale);
   }
 
   function renderTimerBanner(){
     if(activeTimer){
+      const paused = timerStatus(activeTimer) === 'paused';
       timerBannerEl.hidden = false;
+      timerBannerEl.classList.toggle('is-paused', paused);
+      timerRunningActionsEl.hidden = paused;   // while paused, Resume is the ONLY button
+      timerPausedActionsEl.hidden = !paused;
+      timerPausedLineEl.hidden = !paused;
       timerActivityNameEl.textContent = activityName(activeTimer.activityId);
       timerStartedLabelEl.textContent = ` · started ${fmt12h(msToHHMM(activeTimer.startTime))}`;
       tickTimerBanner();
       if(!timerTickHandle) timerTickHandle = setInterval(tickTimerBanner, 1000);
     } else {
       timerBannerEl.hidden = true;
+      timerBannerEl.classList.remove('is-paused');
       if(timerTickHandle){ clearInterval(timerTickHandle); timerTickHandle = null; }
     }
   }
@@ -1245,11 +1324,11 @@
 
   function openStopModal(){
     if(!activeTimer) return;
-    const elapsedMs = Date.now() - activeTimer.startTime;
+    const activeMs = timerActiveMs(activeTimer);
     const activity = activities.find(a => a.id === activeTimer.activityId);
     stopModalSummaryEl.textContent =
-      `${activityName(activeTimer.activityId)} — started ${fmt12h(msToHHMM(activeTimer.startTime))}, ${fmtElapsed(elapsedMs)} elapsed.`;
-    stopModalWarningEl.hidden = !isTimerStale(activity, elapsedMs);
+      `${activityName(activeTimer.activityId)} — started ${fmt12h(msToHHMM(activeTimer.startTime))}, ${fmtElapsed(activeMs)} active.`;
+    stopModalWarningEl.hidden = !isTimerStale(activity, activeMs);
     stopEditEndTimeEl.value = nowTimeStr();
     showStopChoice();
     stopModalEl.hidden = false;
@@ -1258,7 +1337,8 @@
 
   document.getElementById('stopTimerBtn').addEventListener('click', openStopModal);
 
-  async function finalizeTimerEntry(endMs){
+  // durationMs is active time only — paused time is never part of it.
+  async function finalizeTimerEntry(endMs, durationMs){
     const { activityId, startTime } = activeTimer;
     await timeEntriesCol(currentUid).add({
       activityId,
@@ -1266,7 +1346,7 @@
       weekday: weekdayFromDateStr(msToDateStr(startTime)),
       startTime: msToHHMM(startTime),
       endTime: msToHHMM(endMs),
-      durationMinutes: Math.round((endMs - startTime) / 60000),
+      durationMinutes: Math.round(durationMs / 60000),
       source: 'timer',
       createdAt: firebase.firestore.FieldValue.serverTimestamp(),
     });
@@ -1276,7 +1356,8 @@
   document.getElementById('stopKeepBtn').addEventListener('click', async ()=>{
     if(!activeTimer) return;
     try{
-      await finalizeTimerEntry(Date.now());
+      const now = Date.now();
+      await finalizeTimerEntry(now, timerActiveMs(activeTimer, now));
       closeStopModal();
     }catch(err){
       console.error('stop (keep as-is) failed', err);
@@ -1297,8 +1378,11 @@
     let endMs = combineDateWithTime(activeTimer.startTime, hhmm);
     if(endMs <= activeTimer.startTime) endMs += 24*60*60*1000; // crossed midnight
     if(endMs <= activeTimer.startTime){ setStopEditEndError('End time must be after the start time.'); return; }
+    // The edited span minus any time spent paused (pauses are never counted).
+    const durationMs = (endMs - activeTimer.startTime) - timerPausedMs(activeTimer);
+    if(durationMs <= 0){ setStopEditEndError('That end time leaves no tracked time once pauses are removed.'); return; }
     try{
-      await finalizeTimerEntry(endMs);
+      await finalizeTimerEntry(endMs, durationMs);
       closeStopModal();
     }catch(err){
       console.error('stop (edit end) failed', err);

@@ -376,7 +376,34 @@ header{
   letter-spacing: -0.01em;
 }
 .timer-card-actions{ display:flex; gap: 10px; margin-top: 4px; }
-.timer-card-actions .btn-primary{ flex:1; padding: 16px 20px; font-size: 17px; }
+.timer-card-actions .btn-primary{ flex:1.4; padding: 16px 20px; font-size: 17px; }
+.timer-card-actions .btn-ghost{ flex:1; padding: 16px 20px; font-size: 17px; }
+
+/* PAUSED STATE — deliberately unlike the running state: amber border, dimmed
+   time, an amber status line, and a single full-width vivid-green Resume
+   (a different, brighter green than the sage Stop button). */
+.timer-banner.is-paused{ border-color: var(--amber); }
+.timer-banner.is-paused .timer-banner-elapsed{ color: var(--text-faint); }
+.timer-paused-line{
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--amber);
+  margin-bottom: 14px;
+}
+.timer-resume-btn{
+  width: 100%;
+  border: none;
+  border-radius: 999px;
+  padding: 22px 20px;
+  font-family:'Inter', sans-serif;
+  font-size: 21px;
+  font-weight: 700;
+  background: #4fc27a;
+  color: #07210f;
+  cursor: pointer;
+  transition: filter 0.1s, transform 0.1s;
+}
+.timer-resume-btn:active{ filter: brightness(0.88); transform: scale(0.98); }
 .timer-banner-warning{
   margin-bottom: 12px;
   font-size: 12.5px;
