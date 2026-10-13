@@ -1283,24 +1283,48 @@
       timerStartedLabelEl.textContent = ` · started ${fmt12h(msToHHMM(activeTimer.startTime))}`;
       tickTimerBanner();
       if(!timerTickHandle) timerTickHandle = setInterval(tickTimerBanner, 1000);
+      if(!timerPollHandle) timerPollHandle = setInterval(()=>{ if(!document.hidden) refreshTimerFromServer(); }, 10000);
     } else {
+      if(timerPollHandle){ clearInterval(timerPollHandle); timerPollHandle = null; }
       timerBannerEl.hidden = true;
       timerBannerEl.classList.remove('is-paused');
       if(timerTickHandle){ clearInterval(timerTickHandle); timerTickHandle = null; }
     }
   }
 
+  function applyTimerSnapshot(snap){
+    const next = snap.exists ? snap.data() : null;
+    if(JSON.stringify(next) === JSON.stringify(activeTimer)) return; // nothing changed
+    activeTimer = next;
+    renderTimerBanner();
+    renderHomeActivities(); // per-row Timer buttons enable/disable with activeTimer
+  }
+
   function startTimerListener(uid){
     if(unsubscribeTimer) unsubscribeTimer();
     unsubscribeTimer = metaDoc(uid, 'activeTimer').onSnapshot(
-      snap => {
-        activeTimer = snap.exists ? snap.data() : null;
-        renderTimerBanner();
-        renderHomeActivities(); // per-row Timer buttons enable/disable with activeTimer
-      },
+      snap => applyTimerSnapshot(snap),
       err => console.error('timer listener failed', err)
     );
   }
+
+  // Safety net for flaky live connections. iPhones suspend a web app's
+  // connection when it's backgrounded or the screen locks, and the live
+  // listener above can then sit on stale state (e.g. a paused screen after
+  // the timer was resumed on another device). So also ask the server
+  // directly: when the app comes back to the foreground, when the network
+  // returns, and every 10s while a timer is active and the app is visible.
+  async function refreshTimerFromServer(){
+    if(!currentUid) return;
+    try{
+      applyTimerSnapshot(await metaDoc(currentUid, 'activeTimer').get({ source: 'server' }));
+    }catch(e){ /* offline — the live listener will catch up when it reconnects */ }
+  }
+  document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) refreshTimerFromServer(); });
+  window.addEventListener('pageshow', refreshTimerFromServer);
+  window.addEventListener('online', refreshTimerFromServer);
+  window.addEventListener('focus', refreshTimerFromServer);
+  let timerPollHandle = null;
 
   // ---------- stop-timer confirmation modal ----------
   const stopModalEl = document.getElementById('stopTimerModal');
@@ -1404,6 +1428,14 @@
     }
   });
 
+  // Shows which build this device is actually running (read from the ?v=N on
+  // the script tag), so a stale cached copy on a phone is easy to spot.
+  (function showAppVersion(){
+    const s = [...document.scripts].find(x => x.src.includes('app.js'));
+    const v = s && new URL(s.src).searchParams.get('v');
+    document.getElementById('appVersion').textContent = v ? `Version ${v}` : '';
+  })();
+
   // ---------- page navigation ----------
   const PAGES = ['home', 'activities', 'planner', 'logtime', 'history', 'settings'];
   let currentPage = 'home';
@@ -1506,6 +1538,7 @@
       if(unsubscribeSchedules){ unsubscribeSchedules(); unsubscribeSchedules = null; }
       if(unsubscribeSettings){ unsubscribeSettings(); unsubscribeSettings = null; }
       if(timerTickHandle){ clearInterval(timerTickHandle); timerTickHandle = null; }
+      if(timerPollHandle){ clearInterval(timerPollHandle); timerPollHandle = null; }
       if(periodRolloverIntervalHandle){ clearInterval(periodRolloverIntervalHandle); periodRolloverIntervalHandle = null; }
       if(homeSortable){ homeSortable.destroy(); homeSortable = null; }
       closeActivityForm();

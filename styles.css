@@ -457,6 +457,8 @@ header{
 .btn-danger-ghost{ color: var(--coral) !important; }
 .btn-danger-ghost:active{ background: var(--coral-dim) !important; }
 
+.app-version{ margin-top: 18px; text-align:center; font-size: 11.5px; color: var(--text-faint); }
+
 /* HISTORY PAGE */
 .history-scroll{
   overflow-x: auto;
