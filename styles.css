@@ -457,6 +457,15 @@ header{
 .btn-danger-ghost{ color: var(--coral) !important; }
 .btn-danger-ghost:active{ background: var(--coral-dim) !important; }
 
+.update-banner{
+  display:flex; align-items:center; justify-content:space-between; gap: 12px;
+  background: var(--amber-dim); color: var(--amber);
+  border-radius: 10px; padding: 10px 12px; margin-bottom: 14px; font-size: 13.5px;
+}
+.update-banner button{
+  background: var(--amber); color:#241a0d; border:none; border-radius: 999px;
+  padding: 7px 14px; font-weight:600; font-size: 13px; cursor:pointer;
+}
 .app-version{ margin-top: 18px; text-align:center; font-size: 11.5px; color: var(--text-faint); }
 
 /* HISTORY PAGE */

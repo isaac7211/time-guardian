@@ -1430,11 +1430,60 @@
 
   // Shows which build this device is actually running (read from the ?v=N on
   // the script tag), so a stale cached copy on a phone is easy to spot.
-  (function showAppVersion(){
+  const RUNNING_VERSION = (()=>{
     const s = [...document.scripts].find(x => x.src.includes('app.js'));
-    const v = s && new URL(s.src).searchParams.get('v');
-    document.getElementById('appVersion').textContent = v ? `Version ${v}` : '';
+    return Number(s && new URL(s.src).searchParams.get('v')) || 0;
   })();
+  document.getElementById('appVersion').textContent = RUNNING_VERSION ? `Version ${RUNNING_VERSION}` : '';
+
+  // ---------- self-update ----------
+  // A home-screen app that stays suspended in the background keeps running
+  // whatever code it loaded days ago, and the host lets pages be cached for
+  // 10 minutes besides. So when the app comes back to the foreground (and
+  // every few minutes while it's visible) it asks the server which version
+  // is deployed, bypassing every cache, and reloads itself if it's newer.
+  // The timer lives in Firestore, so a reload never loses it.
+  let lastUpdateCheck = 0;
+  function reloadForUpdate(){
+    // Cache-busted URL so the reload can't be served a stale cached page;
+    // the param is stripped again on load.
+    const url = new URL(location.href);
+    url.searchParams.set('r', String(Date.now()));
+    location.replace(url.toString());
+  }
+  function safeToReloadNow(){
+    const a = document.activeElement;
+    const typing = a && ['INPUT','TEXTAREA','SELECT'].includes(a.tagName);
+    const modalOpen = [...document.querySelectorAll('.modal-backdrop')].some(m => !m.hidden);
+    return !typing && !modalOpen;
+  }
+  async function checkForNewVersion(){
+    if(!RUNNING_VERSION || document.hidden) return;
+    if(Date.now() - lastUpdateCheck < 30000) return;   // at most every 30s
+    lastUpdateCheck = Date.now();
+    try{
+      const res = await fetch(new URL('index.html', location.href).pathname + '?c=' + Date.now(), { cache: 'no-store' });
+      const m = (await res.text()).match(/app\.js\?v=(\d+)/);
+      if(!m || Number(m[1]) <= RUNNING_VERSION) return;
+      // Loop guard: never auto-reload more than once a minute.
+      const last = Number(sessionStorage.getItem('tgLastAutoReload') || 0);
+      if(safeToReloadNow() && Date.now() - last > 60000){
+        sessionStorage.setItem('tgLastAutoReload', String(Date.now()));
+        reloadForUpdate();
+      } else {
+        document.getElementById('updateBanner').hidden = false;
+      }
+    }catch(e){ /* offline — try again next time */ }
+  }
+  document.getElementById('updateReloadBtn').addEventListener('click', reloadForUpdate);
+  document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) checkForNewVersion(); });
+  window.addEventListener('pageshow', checkForNewVersion);
+  window.addEventListener('focus', checkForNewVersion);
+  setInterval(checkForNewVersion, 5 * 60 * 1000);
+  checkForNewVersion();
+  if(new URLSearchParams(location.search).has('r')){
+    history.replaceState(null, '', location.pathname + location.hash);
+  }
 
   // ---------- page navigation ----------
   const PAGES = ['home', 'activities', 'planner', 'logtime', 'history', 'settings'];
