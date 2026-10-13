@@ -378,12 +378,6 @@ header{
   color: var(--sage);
   font-variant-numeric: tabular-nums;
 }
-.timer-banner-elapsed.is-countdown{ color: var(--amber); }
-.timer-phase-label{
-  font-size: 10.5px;
-  color: var(--text-faint);
-  margin-top: 1px;
-}
 .timer-stop-btn{ padding: 9px 16px; font-size: 13px; }
 .timer-banner-warning{
   margin-top: 10px;

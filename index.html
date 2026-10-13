@@ -11,7 +11,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=14">
+<link rel="stylesheet" href="styles.css?v=15">
 </head>
 <body>
 <div id="app">
@@ -52,7 +52,6 @@
         <div class="timer-banner-right">
           <div class="timer-elapsed-col">
             <div class="timer-banner-elapsed" id="timerElapsed">0:00</div>
-            <div class="timer-phase-label" id="timerPhaseLabel">until minimum</div>
           </div>
           <button class="btn-primary timer-stop-btn" id="stopTimerBtn" type="button">Stop</button>
         </div>
@@ -101,9 +100,6 @@
         </label>
         <label class="form-label">Goal (hours)
           <input type="number" id="formGoalHours" class="form-input" required min="0.25" step="0.25" placeholder="e.g. 1.5">
-        </label>
-        <label class="form-label">Minimum session (minutes)
-          <input type="number" id="formMinSession" class="form-input" required min="1" step="1" placeholder="e.g. 10">
         </label>
         <div class="form-error" id="formError" hidden></div>
         <div class="form-actions">
@@ -262,6 +258,6 @@
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
-<script src="app.js?v=14"></script>
+<script src="app.js?v=15"></script>
 </body>
 </html>
