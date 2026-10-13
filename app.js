@@ -128,9 +128,21 @@
     return (hrs % 1 === 0 ? hrs : hrs.toFixed(2).replace(/0+$/,'').replace(/\.$/,''));
   }
 
+  // The one display format for durations: "45 min", "1 hr 30 min", "4 hr".
+  // Whole minutes only; exact hours omit the "0 min". (Live stopwatch-style
+  // readouts like the running timer stay H:MM:SS — those are clocks, not
+  // durations.)
+  function fmtDuration(totalMinutes){
+    const mins = Math.max(0, Math.round(totalMinutes));
+    if(mins < 60) return `${mins} min`;
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return m === 0 ? `${h} hr` : `${h} hr ${m} min`;
+  }
+
   function goalLabel(goalMinutes, cadence){
     const per = cadence === 'daily' ? 'day' : cadence === 'weekly' ? 'week' : 'month';
-    return `${fmtHours(goalMinutes)} hr / ${per}`;
+    return `${fmtDuration(goalMinutes)} / ${per}`;
   }
 
   function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -333,7 +345,7 @@
         .map(part => ({ part, items: (schedule.days && schedule.days[day] && schedule.days[day][part]) || [] }))
         .filter(p => p.items.length);
       const partsHtml = parts.length
-        ? parts.map(p => `<div class="home-plan-part"><span class="home-plan-part-label">${DAYPART_LABELS[p.part]}:</span> ${p.items.map(it => `${escapeHtml(activityName(it.activityId))} ${it.minutes}m`).join(', ')}</div>`).join('')
+        ? parts.map(p => `<div class="home-plan-part"><span class="home-plan-part-label">${DAYPART_LABELS[p.part]}:</span> ${p.items.map(it => `${escapeHtml(activityName(it.activityId))} ${fmtDuration(it.minutes)}`).join(', ')}</div>`).join('')
         : '<div class="home-plan-part empty">Nothing planned</div>';
       return `
         <div class="home-plan-day">
@@ -366,7 +378,7 @@
         <div class="activity-item-top">
           <div>
             <div class="name">${escapeHtml(a.name)}</div>
-            <div class="meta">${logged} / ${a.goalMinutes} min ${periodLabel(a.cadence)}${done ? ' ✓' : ''}</div>
+            <div class="meta">${fmtDuration(logged)} / ${fmtDuration(a.goalMinutes)} ${periodLabel(a.cadence)}${done ? ' ✓' : ''}</div>
           </div>
           <div class="home-row-right">
             <button class="btn-pill-icon timer-row-btn" data-id="${a.id}" type="button"${activeTimer ? ' disabled' : ''}>▶ Timer</button>
@@ -678,7 +690,7 @@
       const partsHtml = DAYPART_KEYS.map(part => {
         const items = (schedule.days && schedule.days[day] && schedule.days[day][part]) || [];
         const chips = items.map((item, idx) => `
-          <span class="planner-chip">${escapeHtml(activityName(item.activityId))} · ${item.minutes}m
+          <span class="planner-chip">${escapeHtml(activityName(item.activityId))} · ${fmtDuration(item.minutes)}
             <button class="chip-remove" data-day="${day}" data-part="${part}" data-idx="${idx}" title="Remove" type="button">✕</button>
           </span>
         `).join('');
@@ -852,13 +864,11 @@
     timeEntries.forEach(e => {
       const li = document.createElement('li');
       li.className = 'time-entry-item';
-      const when = e.startTime && e.endTime
-        ? `${fmt12h(e.startTime)}–${fmt12h(e.endTime)}`
-        : `${e.durationMinutes} min`;
+      const range = e.startTime && e.endTime ? ` · ${fmt12h(e.startTime)}–${fmt12h(e.endTime)}` : '';
       li.innerHTML = `
         <div>
           <div class="name">${escapeHtml(activityName(e.activityId))}</div>
-          <div class="meta">${e.date} · ${e.weekday} · ${when} · ${e.durationMinutes} min</div>
+          <div class="meta">${e.date} · ${e.weekday}${range} · ${fmtDuration(e.durationMinutes)}</div>
         </div>
         <div class="item-right">
           <span class="source-tag">${e.source}</span>
@@ -1138,10 +1148,10 @@
       const avg = totals.length ? Math.round(totals.reduce((s, x) => s + x, 0) / totals.length) : null;
 
       html += `<tr><td class="hist-activity-col">${escapeHtml(a.name)}</td>`;
-      html += `<td>${high === null ? '–' : high}</td><td>${low === null ? '–' : low}</td><td>${avg === null ? '–' : avg}</td>`;
+      html += `<td>${high === null ? '–' : fmtDuration(high)}</td><td>${low === null ? '–' : fmtDuration(low)}</td><td>${avg === null ? '–' : fmtDuration(avg)}</td>`;
       weekMondays.forEach(w => {
         if(!weekAppliesToActivity(a, w, createdWeekStr)){ html += '<td class="hist-na">–</td>'; return; }
-        html += `<td>${weekTotalMinutes(a.id, w)}</td>`;
+        html += `<td>${fmtDuration(weekTotalMinutes(a.id, w))}</td>`;
       });
       html += '</tr>';
     });
