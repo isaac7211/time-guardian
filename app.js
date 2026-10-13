@@ -199,6 +199,14 @@
     if(h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
     return `${m}:${String(s).padStart(2,'0')}`;
   }
+  // Always H:MM:SS — the big timer readout (0:00:06, 1:23:45).
+  function fmtHMS(ms){
+    const totalSec = Math.max(0, Math.floor(ms/1000));
+    const h = Math.floor(totalSec/3600);
+    const m = Math.floor((totalSec%3600)/60);
+    const s = totalSec%60;
+    return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  }
 
   // ---------- home header + period boundaries ----------
   // Weekly = Monday-Sunday, monthly = calendar month, per the spec. Computed
@@ -1183,7 +1191,7 @@
     const elapsedMs = Date.now() - activeTimer.startTime;
     const activity = activities.find(a => a.id === activeTimer.activityId);
 
-    timerElapsedEl.textContent = fmtElapsed(elapsedMs);
+    timerElapsedEl.textContent = fmtHMS(elapsedMs);
 
     const stale = isTimerStale(activity, elapsedMs);
     timerWarningEl.hidden = !stale;
@@ -1194,7 +1202,7 @@
     if(activeTimer){
       timerBannerEl.hidden = false;
       timerActivityNameEl.textContent = activityName(activeTimer.activityId);
-      timerStartedLabelEl.textContent = `started ${fmt12h(msToHHMM(activeTimer.startTime))}`;
+      timerStartedLabelEl.textContent = ` · started ${fmt12h(msToHHMM(activeTimer.startTime))}`;
       tickTimerBanner();
       if(!timerTickHandle) timerTickHandle = setInterval(tickTimerBanner, 1000);
     } else {
