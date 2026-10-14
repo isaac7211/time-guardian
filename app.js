@@ -1305,6 +1305,7 @@
       if(timerPollHandle){ clearInterval(timerPollHandle); timerPollHandle = null; }
       timerBannerEl.hidden = true;
       timerBannerEl.classList.remove('is-paused');
+      closeStopModal(); // timer ended elsewhere — don't leave its pop-up stranded
       if(timerTickHandle){ clearInterval(timerTickHandle); timerTickHandle = null; }
     }
   }
@@ -1383,6 +1384,21 @@
     stopModalEl.hidden = false;
   }
   function closeStopModal(){ stopModalEl.hidden = true; }
+
+  // Dismissing (X, tapping outside, Escape) only hides the pop-up — it never
+  // touches the timer, so a running or paused timer carries on with no time
+  // lost. "Outside" only counts if the press both started and ended on the
+  // dark backdrop, so dragging a text selection out of the card can't close it.
+  document.getElementById('stopCloseBtn').addEventListener('click', closeStopModal);
+  let stopPressStartedOnBackdrop = false;
+  stopModalEl.addEventListener('pointerdown', e => { stopPressStartedOnBackdrop = (e.target === stopModalEl); });
+  stopModalEl.addEventListener('click', e => {
+    if(e.target === stopModalEl && stopPressStartedOnBackdrop) closeStopModal();
+    stopPressStartedOnBackdrop = false;
+  });
+  document.addEventListener('keydown', e => {
+    if(e.key === 'Escape' && !stopModalEl.hidden) closeStopModal();
+  });
 
   document.getElementById('stopTimerBtn').addEventListener('click', openStopModal);
 

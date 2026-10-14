@@ -426,6 +426,7 @@ header{
   z-index: 100;
 }
 .modal-card{
+  position: relative;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 16px;
@@ -433,11 +434,27 @@ header{
   width: 100%;
   max-width: 360px;
 }
+.modal-close{
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.modal-close:active{ background: var(--surface-2); }
 .modal-title{
   font-family:'Fraunces', serif;
   font-size: 17px;
   font-weight:600;
   margin: 0 0 8px;
+  padding-right: 44px;   /* keeps long titles clear of the close button */
 }
 .modal-summary{ font-size: 13.5px; color: var(--text-dim); line-height:1.5; }
 .modal-warning{
