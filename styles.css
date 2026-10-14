@@ -696,7 +696,7 @@ header{
 .goal-progress-status{ font-size: 12px; color: var(--text-faint); text-align:right; margin-top: 2px; }
 .goal-progress-status.is-reached{ color: var(--sage); }
 .goal-progress .progress-track{ margin-top: 6px; }
-.goal-activity-list{ border-top: 1px solid var(--border); margin-top: 4px; }
+.goal-activity-list{ margin-top: 4px; }
 .goal-activity-row{
   display:flex;
   justify-content:space-between;
@@ -744,7 +744,7 @@ header{
 .strip-cell.is-hit{ background: var(--sage-dim); }
 .strip-cell.is-miss .strip-icon{ color: var(--coral); }
 .strip-cell.is-miss{ background: var(--coral-dim); }
-.strip-cell.is-pending .strip-icon{ color: var(--amber); font-size: 11px; line-height: 2.2; }
+.strip-cell.is-pending .strip-icon{ color: #ffffff; font-size: 11px; line-height: 2.2; }
 .strip-cell.is-off .strip-icon{ font-size: 10.5px; font-weight:500; line-height: 2.1; }
 .strip-cell.is-off{ opacity: 0.7; }
 #homeGoalResults{ margin-bottom: 14px; }
