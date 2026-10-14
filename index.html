@@ -11,7 +11,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=31">
+<link rel="stylesheet" href="styles.css?v=32">
 </head>
 <body>
 <div id="app">
@@ -54,6 +54,7 @@
     <div id="timerBanner" class="timer-banner" hidden>
       <div class="timer-card-label"><span id="timerActivityName">—</span><span class="timer-card-started" id="timerStartedLabel"></span></div>
       <div class="timer-banner-elapsed" id="timerElapsed">0:00:00</div>
+      <div class="timer-goals" id="timerGoals" hidden></div>
       <div class="timer-banner-warning" id="timerWarning" hidden>This has been running a while — did you forget to stop it?</div>
       <div class="timer-paused-line" id="timerPausedLine" hidden></div>
       <!-- Running: Stop + Pause side by side. Paused: both are replaced by one
@@ -320,6 +321,6 @@
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
-<script src="app.js?v=31"></script>
+<script src="app.js?v=32"></script>
 </body>
 </html>

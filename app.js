@@ -1529,6 +1529,51 @@
     return activeMs > STALE_TIMER_MS;
   }
 
+  // ---------- goal countdowns under the running timer ----------
+  // One entry per line to show for the running activity: a daily goal gives
+  // "<name> today" and "<name> this week"; a weekly goal gives just "this
+  // week". Remaining = target minus everything tracked toward the goal (saved
+  // entries plus the running session). The session counts toward the day it
+  // started; if that day isn't in the current week it doesn't count to it.
+  function goalCountdownLines(activityId, activeMs){
+    const sessionDate = msToDateStr(activeTimer.startTime);
+    const today = periodBounds.today;
+    const lines = [];
+    sortedGoals().filter(g => (g.activityIds || []).includes(activityId)).forEach(g => {
+      const r = scoreGoalForWeek(g, periodBounds.weekStart, periodEntries);
+      const sessionInWeek = sessionDate >= periodBounds.weekStart && sessionDate <= periodBounds.weekEnd;
+      const weekMs = r.weeklyMinutes * 60000 + (sessionInWeek ? activeMs : 0);
+      if(g.type === 'daily'){
+        const t = r.days.find(d => d.date === today);
+        if(!t || !t.isWorking){
+          lines.push({ label: `${g.name} today`, text: 'Day off', kind: 'off' });
+        } else {
+          const dayMs = t.minutes * 60000 + (sessionDate === today ? activeMs : 0);
+          lines.push({ label: `${g.name} today`, ...countdownValue(g.targetMinutes * 60000 - dayMs) });
+        }
+      }
+      lines.push({ label: `${g.name} this week`, ...countdownValue(r.weeklyTarget * 60000 - weekMs) });
+    });
+    return lines;
+  }
+
+  // "3:42:10 left", or "Goal reached" plus "+0:12:00 over" once past the
+  // target — never a negative number.
+  function countdownValue(remainingMs){
+    if(remainingMs > 0) return { text: `${fmtHMS(remainingMs)} left`, kind: 'left' };
+    const over = -remainingMs;
+    return { text: over >= 1000 ? `Goal reached · +${fmtHMS(over)} over` : 'Goal reached', kind: 'reached' };
+  }
+
+  function renderTimerGoalLines(activeMs){
+    const el = document.getElementById('timerGoals');
+    const lines = goalCountdownLines(activeTimer.activityId, activeMs);
+    el.hidden = lines.length === 0;
+    el.innerHTML = lines.map(l =>
+      `<div class="timer-goal-line is-${l.kind}"><span class="timer-goal-label">${escapeHtml(l.label)}:</span> <span class="timer-goal-value">${l.text}</span></div>`
+    ).join('');
+  }
+
   function tickTimerBanner(){
     if(!activeTimer) return;
     const now = Date.now();
@@ -1536,6 +1581,7 @@
     const activeMs = timerActiveMs(activeTimer, now);
 
     timerElapsedEl.textContent = fmtHMS(activeMs);
+    renderTimerGoalLines(activeMs);
     if(paused){
       timerPausedLineEl.textContent = `Paused for ${fmtElapsed(now - (activeTimer.pausedAt ?? now))}`;
     }
