@@ -210,7 +210,7 @@
     if(fresh.today === periodBounds.today) return; // still the same day
     periodBounds = fresh;
     renderHomeHeader();
-    renderHomeActivities();
+    renderHomeActivities(); renderHomeGoals();
     renderHomePlan(); // the rolling day list shifts/refills as the day changes
     if(currentPage === 'history') renderHistoryPage();
   }
@@ -357,7 +357,7 @@
     });
   }
 
-  document.getElementById('homeActivityList').addEventListener('click', async (e)=>{
+  async function onTimerButtonClick(e){
     const btn = e.target.closest('.timer-row-btn');
     if(!btn || btn.disabled || !currentUid || activeTimer) return;
     try{
@@ -366,7 +366,9 @@
       console.error('start timer failed', err);
       alert('Could not start timer — see console.');
     }
-  });
+  }
+  document.getElementById('homeActivityList').addEventListener('click', onTimerButtonClick);
+  document.getElementById('homeGoals').addEventListener('click', onTimerButtonClick);
 
   // ---------- PAGE: ACTIVITIES (management — shows every activity,
   // regardless of this week's scheduled visibility) ----------
@@ -410,7 +412,7 @@
     unsubscribeActivities = activitiesCol(uid).orderBy('createdAt').onSnapshot(
       snap => {
         activities = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        renderHomeActivities();
+        renderHomeActivities(); renderHomeGoals();
         renderActivitiesPage();
         renderGoalsPage();
         populateActivitySelect(document.getElementById('logActivityId'));
@@ -569,6 +571,101 @@
     };
   }
 
+  // ---------- HOME: goals + this week's results ----------
+  // Compact duration for the 7-day strip only ("4h 5m", "35m", "4h"); every
+  // other place uses fmtDuration's "4 hr 5 min".
+  function fmtDurationShort(totalMinutes){
+    const mins = Math.max(0, Math.round(totalMinutes));
+    if(mins === 0) return '–';
+    const h = Math.floor(mins / 60), m = mins % 60;
+    if(h === 0) return `${m}m`;
+    return m === 0 ? `${h}h` : `${h}h ${m}m`;
+  }
+
+  // One progress row: label, "done / target", left/reached status, bar.
+  // Bar: sage while in progress, white once full, blue only at double the target.
+  function goalProgressHtml(label, minutes, target){
+    const reached = minutes >= target;
+    const over = minutes - target;
+    const status = !reached
+      ? `${fmtDuration(target - minutes)} left`
+      : `Goal reached ✓${over > 0 ? ` · ${fmtDuration(over)} over` : ''}`;
+    const pct = Math.min(100, (minutes / target) * 100);
+    const cls = minutes >= target * 2 ? ' is-over' : (reached ? ' is-full' : '');
+    return `
+      <div class="goal-progress">
+        <div class="goal-progress-line">
+          <span class="goal-progress-label">${label}</span>
+          <span class="goal-progress-amount">${fmtDuration(minutes)} / ${fmtDuration(target)}</span>
+        </div>
+        <div class="goal-progress-status${reached ? ' is-reached' : ''}">${status}</div>
+        <div class="progress-track"><div class="progress-fill${cls}" style="width:${pct}%"></div></div>
+      </div>`;
+  }
+
+  function renderHomeGoals(){
+    const box = document.getElementById('homeGoals');
+    const resultsBox = document.getElementById('homeGoalResults');
+    if(!box || !resultsBox) return;
+    const list = sortedGoals();
+    if(!list.length){
+      box.innerHTML = '<div class="empty-note">No goals yet — add one on the Goals page.</div>';
+      resultsBox.innerHTML = '';
+      return;
+    }
+    const today = periodBounds.today;
+    const scored = list.map(g => ({ g, r: scoreGoalForWeek(g, periodBounds.weekStart, periodEntries) }));
+
+    box.innerHTML = scored.map(({ g, r }) => {
+      let progress;
+      if(g.type === 'daily'){
+        const t = r.days.find(d => d.date === today);
+        progress = (t && t.isWorking)
+          ? goalProgressHtml('Today', t.minutes, g.targetMinutes)
+          : `<div class="goal-progress"><div class="goal-progress-line"><span class="goal-progress-label">Today</span><span class="goal-progress-amount">Not a working day</span></div></div>`;
+        progress += goalProgressHtml('This week', r.weeklyMinutes, r.weeklyTarget);
+      } else {
+        progress = goalProgressHtml('This week', r.weeklyMinutes, r.weeklyTarget);
+      }
+      const acts = (g.activityIds || []).map(id => activities.find(a => a.id === id)).filter(Boolean);
+      const actsHtml = acts.map(a => `
+        <div class="goal-activity-row">
+          <span class="goal-activity-name">${escapeHtml(a.name)}</span>
+          <button class="btn-pill-icon timer-row-btn" data-id="${a.id}" type="button"${activeTimer ? ' disabled' : ''}>▶ Timer</button>
+        </div>`).join('');
+      return `<div class="goal-card"><div class="goal-card-name">${escapeHtml(g.name)}</div>${progress}<div class="goal-activity-list">${actsHtml}</div></div>`;
+    }).join('');
+
+    // Results: daily goals get a Mon–Sun strip; each weekly goal is one line.
+    resultsBox.innerHTML = scored.map(({ g, r }) => {
+      const totalCls = r.weeklyHit ? ' is-reached' : '';
+      if(g.type !== 'daily'){
+        return `<div class="goal-result-line"><span>${escapeHtml(g.name)}</span><span class="goal-result-total${totalCls}">${fmtDuration(r.weeklyMinutes)} / ${fmtDuration(r.weeklyTarget)}${r.weeklyHit ? ' ✓' : ''}</span></div>`;
+      }
+      const cells = r.days.map(d => {
+        let icon, cls;
+        if(!d.isWorking){ icon = 'off'; cls = 'is-off'; }
+        else if(d.hit){ icon = '✓'; cls = 'is-hit'; }
+        else if(d.date < today){ icon = '✗'; cls = 'is-miss'; }
+        else if(d.date === today){ icon = '●'; cls = 'is-pending'; }
+        else { icon = '·'; cls = 'is-future'; }
+        return `<div class="strip-cell ${cls}${d.date === today ? ' is-today' : ''}">
+          <div class="strip-day">${DAY_SHORT[d.dayKey]}</div>
+          <div class="strip-icon">${icon}</div>
+          <div class="strip-time">${fmtDurationShort(d.minutes)}</div>
+        </div>`;
+      }).join('');
+      return `
+        <div class="goal-result">
+          <div class="goal-result-line">
+            <span>${escapeHtml(g.name)} · ${r.daysHit} of ${r.workingDayCount} days</span>
+            <span class="goal-result-total${totalCls}">${fmtDuration(r.weeklyMinutes)} / ${fmtDuration(r.weeklyTarget)}</span>
+          </div>
+          <div class="day-strip">${cells}</div>
+        </div>`;
+    }).join('');
+  }
+
   function renderGoalsPage(){
     const list = document.getElementById('goalList');
     list.innerHTML = '';
@@ -602,6 +699,7 @@
       snap => {
         goals = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         renderGoalsPage();
+        renderHomeGoals();
       },
       err => {
         console.error('goals listener failed', err);
@@ -1103,7 +1201,7 @@
     unsubscribePeriodEntries = timeEntriesCol(uid).where('date', '>=', periodBounds.weekStart).onSnapshot(
       snap => {
         periodEntries = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        renderHomeActivities();
+        renderHomeActivities(); renderHomeGoals();
       },
       err => console.error('period entries listener failed', err)
     );
@@ -1479,7 +1577,7 @@
     if(stableJson(next) === stableJson(activeTimer)) return; // nothing changed
     activeTimer = next;
     renderTimerBanner();
-    renderHomeActivities(); // per-row Timer buttons enable/disable with activeTimer
+    renderHomeActivities(); renderHomeGoals(); // per-row Timer buttons enable/disable with activeTimer
   }
   function applyTimerSnapshot(snap){
     setActiveTimer(snap.exists ? snap.data() : null);
