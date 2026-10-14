@@ -14,6 +14,11 @@
   firebase.initializeApp(firebaseConfig);
   const auth = firebase.auth();
   const db = firebase.firestore();
+  // iPhone Safari can buffer Firestore's default live-update stream, so
+  // changes made elsewhere (e.g. resuming the timer on the laptop) arrive in
+  // delayed batches — we saw up to ~50s. Long polling delivers each update
+  // promptly. Must be set before Firestore is used for anything else.
+  db.settings({ experimentalForceLongPolling: true });
 
   // ---------- data model ----------
   // users/{uid}/activities/{activityId}   - real subcollection, one doc per activity
@@ -1213,26 +1218,39 @@
 
   // Read-modify-write in a transaction so two devices tapping at once can't
   // corrupt the banked time.
+  // After the server confirms the change, apply it to this screen right away
+  // instead of waiting for the live listener to echo it back — that echo can
+  // lag on a flaky mobile connection, and a tap should respond immediately.
   async function pauseTimer(){
     const ref = metaDoc(currentUid, 'activeTimer');
+    let applied = null;
     await db.runTransaction(async tx => {
+      applied = null;
       const snap = await tx.get(ref);
       if(!snap.exists) return;
       const t = snap.data();
       if(timerStatus(t) === 'paused') return;
       const now = Date.now();
-      tx.update(ref, { status: 'paused', accumulatedMs: timerActiveMs(t, now), runStartedAt: null, pausedAt: now });
+      const change = { status: 'paused', accumulatedMs: timerActiveMs(t, now), runStartedAt: null, pausedAt: now };
+      tx.update(ref, change);
+      applied = { ...t, ...change };
     });
+    if(applied) setActiveTimer(applied);
   }
   async function resumeTimer(){
     const ref = metaDoc(currentUid, 'activeTimer');
+    let applied = null;
     await db.runTransaction(async tx => {
+      applied = null;
       const snap = await tx.get(ref);
       if(!snap.exists) return;
       const t = snap.data();
       if(timerStatus(t) !== 'paused') return;
-      tx.update(ref, { status: 'running', runStartedAt: Date.now(), pausedAt: null });
+      const change = { status: 'running', runStartedAt: Date.now(), pausedAt: null };
+      tx.update(ref, change);
+      applied = { ...t, ...change };
     });
+    if(applied) setActiveTimer(applied);
   }
 
   document.getElementById('pauseTimerBtn').addEventListener('click', async ()=>{
@@ -1263,7 +1281,7 @@
     timerElapsedEl.textContent = fmtHMS(activeMs);
     if(paused){
       timerPausedLineEl.textContent =
-        `Paused for ${fmtElapsed(timerPausedMs(activeTimer, now))} total — ${fmtElapsed(activeMs)} active so far.`;
+        `Paused for ${fmtElapsed(now - (activeTimer.pausedAt ?? now))} — ${fmtElapsed(activeMs)} active so far.`;
     }
 
     const stale = !paused && isTimerStale(activity, activeMs);
@@ -1292,12 +1310,20 @@
     }
   }
 
-  function applyTimerSnapshot(snap){
-    const next = snap.exists ? snap.data() : null;
-    if(JSON.stringify(next) === JSON.stringify(activeTimer)) return; // nothing changed
+  // Key-order-insensitive compare, so the same state arriving from the server
+  // (keys in a different order) isn't mistaken for a change.
+  function stableJson(o){
+    return JSON.stringify(o, (k, v) => (v && typeof v === 'object' && !Array.isArray(v))
+      ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b))) : v);
+  }
+  function setActiveTimer(next){
+    if(stableJson(next) === stableJson(activeTimer)) return; // nothing changed
     activeTimer = next;
     renderTimerBanner();
     renderHomeActivities(); // per-row Timer buttons enable/disable with activeTimer
+  }
+  function applyTimerSnapshot(snap){
+    setActiveTimer(snap.exists ? snap.data() : null);
   }
 
   function startTimerListener(uid){
