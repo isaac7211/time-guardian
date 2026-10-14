@@ -474,6 +474,12 @@ header{
 .btn-danger-ghost{ color: var(--coral) !important; }
 .btn-danger-ghost:active{ background: var(--coral-dim) !important; }
 
+.keep-awake-status{
+  text-align:center;
+  font-size:11px;
+  color: var(--text-faint);
+  margin: 14px 0 4px;
+}
 .update-banner{
   display:flex; align-items:center; justify-content:space-between; gap: 12px;
   background: var(--amber-dim); color: var(--amber);

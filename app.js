@@ -1526,9 +1526,152 @@
     history.replaceState(null, '', location.pathname + location.hash);
   }
 
+  // ---------- keep the screen awake on the home page ----------
+  // Ported from Day Chain (same two strategies, same fallback logic, same
+  // status line). The native Screen Wake Lock API is tried first; a silent
+  // looping 1px <video> (muted + loop + playsinline — all required or iOS
+  // no-ops or fullscreens it) is started alongside it as a fallback and
+  // paused if the native lock succeeds. On iPhone BOTH only work when started
+  // synchronously inside a real tap (before any await), so the first tap on
+  // the home page engages it. It stays on while the timer runs, is paused or
+  // isn't running at all, is released when you leave the home page, and is
+  // re-acquired whenever the app returns to the foreground (iOS drops it when
+  // the app is backgrounded or the screen locks).
+  let wakeLock = null;
+  let keepAwakeVideo = null;
+  let keepAwakeMode = null; // 'wakelock' | 'video' | 'failed' | null
+
+  // Uses the page we're navigating TO (set synchronously in navigateTo), not
+  // the one currently shown, so a lock requested by the tap that heads home
+  // isn't mistaken for a request made off the home page.
+  function onHomePage(){ return !!currentUid && intendedPage === 'home'; }
+  function keepAwakeEngaged(){
+    return keepAwakeMode === 'wakelock' || (keepAwakeMode === 'video' && keepAwakeVideo && !keepAwakeVideo.paused);
+  }
+
+  function ensureKeepAwakeVideoEl(){
+    if(keepAwakeVideo) return keepAwakeVideo;
+    const v = document.createElement('video');
+    v.src = 'keepawake.mp4';
+    v.setAttribute('playsinline', '');
+    v.setAttribute('webkit-playsinline', '');
+    v.muted = true;
+    v.defaultMuted = true;
+    v.loop = true;
+    v.setAttribute('aria-hidden', 'true');
+    v.style.cssText = 'position:fixed; top:0; left:0; width:1px; height:1px; opacity:0; pointer-events:none;';
+    document.body.appendChild(v);
+    keepAwakeVideo = v;
+    return v;
+  }
+
+  function updateKeepAwakeIndicator(){
+    const el = document.getElementById('keepAwakeStatus');
+    if(!onHomePage()){ el.hidden = true; return; }
+    if(keepAwakeMode === 'wakelock') el.textContent = 'Screen staying awake · Wake Lock API';
+    else if(keepAwakeMode === 'video') el.textContent = 'Screen staying awake · video fallback';
+    else if(keepAwakeMode === 'failed') el.textContent = 'Couldn’t keep the screen awake on this device';
+    else el.textContent = 'Screen may sleep · tap anywhere to keep it awake';   // waiting for a tap (iPhone needs one)
+    el.hidden = false;
+  }
+
+  function adoptWakeLock(lock){
+    // A request can resolve after we've already left the home page: don't
+    // hold the screen awake anywhere else.
+    if(!onHomePage()){ lock.release().catch(()=>{}); return; }
+    // Never leave an earlier lock orphaned (it would outlive release).
+    if(wakeLock && wakeLock !== lock) wakeLock.release().catch(()=>{});
+    wakeLock = lock;
+    keepAwakeMode = 'wakelock';
+    lock.addEventListener('release', ()=>{
+      if(wakeLock === lock) wakeLock = null;
+      if(keepAwakeMode === 'wakelock') keepAwakeMode = null;
+      updateKeepAwakeIndicator();
+    });
+    if(keepAwakeVideo && !keepAwakeVideo.paused) keepAwakeVideo.pause(); // native lock is enough
+    updateKeepAwakeIndicator();
+  }
+
+  // Call SYNCHRONOUSLY from a tap, before any await — that's the only way
+  // iOS reliably grants either mechanism.
+  function engageKeepAwakeFromGesture(){
+    if(keepAwakeEngaged()) return;
+    let wakeLockPromise = null;
+    if('wakeLock' in navigator){
+      try{ wakeLockPromise = navigator.wakeLock.request('screen'); }
+      catch(e){ wakeLockPromise = Promise.reject(e); }
+    }
+    const video = ensureKeepAwakeVideoEl();
+    let videoPlay;
+    try{ videoPlay = video.play(); }   // synchronous, inside the tap — required on iOS
+    catch(e){ videoPlay = Promise.reject(e); }
+    const videoPlayPromise = Promise.resolve(videoPlay).then(
+      () => true,
+      e => { console.warn('[keep-awake] video fallback failed to start', e); return false; }
+    );
+    const fellBack = async (why)=>{
+      console.warn('[keep-awake]', why);
+      const playing = await videoPlayPromise;
+      keepAwakeMode = playing ? 'video' : 'failed';
+      if(keepAwakeMode === 'failed') console.error('[keep-awake] both mechanisms failed — screen may still auto-lock');
+      updateKeepAwakeIndicator();
+    };
+    if(wakeLockPromise){
+      wakeLockPromise.then(adoptWakeLock).catch(e => fellBack('native Wake Lock unavailable/denied — using video fallback: ' + e));
+    } else {
+      fellBack('Wake Lock API not supported here — using video fallback');
+    }
+  }
+
+  // Quiet attempt with no tap (works on desktop browsers; iPhone will refuse,
+  // which just leaves the "tap anywhere" hint showing — never marks failure).
+  function tryWakeLockWithoutGesture(){
+    if(!onHomePage() || keepAwakeEngaged() || !('wakeLock' in navigator)) return;
+    if(document.visibilityState !== 'visible') return;
+    navigator.wakeLock.request('screen').then(adoptWakeLock).catch(()=>{});
+  }
+
+  async function releaseKeepAwake(){
+    if(wakeLock){
+      const lock = wakeLock;
+      wakeLock = null;
+      try{ await lock.release(); }catch(e){}
+    }
+    if(keepAwakeVideo && !keepAwakeVideo.paused) keepAwakeVideo.pause();
+    keepAwakeMode = null;
+    updateKeepAwakeIndicator();
+  }
+
+  // Back in the foreground: both mechanisms were force-stopped by the OS.
+  // Re-acquiring needs no fresh tap (documented pattern for wake locks; a
+  // video that already played once from a tap may resume freely).
+  function reacquireKeepAwake(){
+    if(!onHomePage() || document.visibilityState !== 'visible') return;
+    if(keepAwakeMode === 'wakelock' && wakeLock) return;   // still holding it
+    const resumeVideo = ()=>{
+      if(keepAwakeVideo && keepAwakeVideo.paused){
+        keepAwakeVideo.play().then(()=>{ keepAwakeMode = 'video'; updateKeepAwakeIndicator(); })
+          .catch(e => console.warn('[keep-awake] resume video failed', e));
+      }
+    };
+    if('wakeLock' in navigator){
+      navigator.wakeLock.request('screen').then(adoptWakeLock).catch(resumeVideo);
+    } else resumeVideo();
+  }
+  document.addEventListener('visibilitychange', reacquireKeepAwake);
+  window.addEventListener('pageshow', reacquireKeepAwake);
+
+  // The first tap anywhere on the home page (and any later tap if it isn't
+  // currently engaged — e.g. after Resume, or after the OS dropped it)
+  // engages it, since a tap is the one thing iOS will honor.
+  document.addEventListener('click', ()=>{
+    if(onHomePage() && !keepAwakeEngaged()) engageKeepAwakeFromGesture();
+  }, true);
+
   // ---------- page navigation ----------
   const PAGES = ['home', 'activities', 'planner', 'logtime', 'history', 'settings'];
   let currentPage = 'home';
+  let intendedPage = 'home';   // set the instant navigation starts (see onHomePage)
   let pendingLogTimePreset = null;
 
   function showPage(page){
@@ -1536,6 +1679,10 @@
     currentPage = page;
     PAGES.forEach(p => { document.getElementById('page-' + p).hidden = (p !== page); });
     document.querySelectorAll('.nav-btn, .nav-icon-btn').forEach(b => b.classList.toggle('is-active', b.dataset.page === page));
+    intendedPage = page;
+    if(page === 'home') tryWakeLockWithoutGesture();   // keep the screen awake on home only
+    else releaseKeepAwake();
+    updateKeepAwakeIndicator();
     if(page === 'logtime'){
       resetLogTimeForm(pendingLogTimePreset);
       pendingLogTimePreset = null;
@@ -1547,6 +1694,10 @@
   }
 
   function navigateTo(page){
+    intendedPage = page;
+    // Heading to home from a tap: engage right here, synchronously, while we
+    // still have the tap's user gesture (iPhone ignores it otherwise).
+    if(page === 'home') engageKeepAwakeFromGesture();
     const newHash = page === 'home' ? '' : page;
     if(location.hash.slice(1) !== newHash) location.hash = newHash;
     else showPage(page); // hash unchanged, so hashchange won't fire on its own
@@ -1634,6 +1785,7 @@
       closeActivityForm();
       closeAssignModal();
       closeStopModal();
+      releaseKeepAwake();
       document.getElementById('appShell').hidden = true;
       document.getElementById('screen-signin').hidden = false;
     }
