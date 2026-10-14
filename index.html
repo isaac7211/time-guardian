@@ -11,7 +11,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=27">
+<link rel="stylesheet" href="styles.css?v=29">
 </head>
 <body>
 <div id="app">
@@ -44,6 +44,7 @@
     <nav class="page-nav">
       <button class="nav-btn" data-page="logtime" type="button">Log Time</button>
       <button class="nav-btn" data-page="activities" type="button">Activities</button>
+      <button class="nav-btn" data-page="goals" type="button">Goals</button>
       <button class="nav-btn" data-page="planner" type="button">Planner</button>
     </nav>
 
@@ -109,6 +110,55 @@
       </form>
 
       <ul id="activityList" class="activity-list"></ul>
+    </section>
+
+    <!-- PAGE: GOALS -->
+    <section id="page-goals" class="page" hidden>
+      <div class="section-header-row">
+        <h2 class="section-title">Goals</h2>
+        <button class="btn-pill-icon" id="addGoalBtn" type="button">+ Add Goal</button>
+      </div>
+
+      <form id="goalForm" class="activity-form" hidden>
+        <input type="hidden" id="goalFormId" value="">
+        <label class="form-label">Name
+          <input type="text" id="goalName" class="form-input" maxlength="60" placeholder="e.g. Work">
+        </label>
+
+        <div class="form-label">Type
+          <div class="mode-toggle">
+            <button type="button" class="mode-btn is-active" id="goalTypeDailyBtn">Daily</button>
+            <button type="button" class="mode-btn" id="goalTypeWeeklyBtn">Weekly</button>
+          </div>
+        </div>
+
+        <div class="form-label"><span id="goalTargetLabel">Daily target</span>
+          <div class="goal-target-row">
+            <input type="number" id="goalHours" class="form-input" min="0" step="1" inputmode="numeric" placeholder="0" aria-label="Hours">
+            <span class="goal-target-unit">hr</span>
+            <input type="number" id="goalMinutes" class="form-input" min="0" max="59" step="1" inputmode="numeric" placeholder="0" aria-label="Minutes">
+            <span class="goal-target-unit">min</span>
+          </div>
+        </div>
+
+        <div class="form-label" id="goalDaysField">Working days
+          <div class="day-chips" id="goalDayChips"></div>
+          <div class="goal-week-total" id="goalWeekTotal"></div>
+        </div>
+
+        <div class="form-label">Activities that count toward this goal
+          <div class="check-list" id="goalActivityChecks"></div>
+        </div>
+
+        <div class="form-error" id="goalFormError" hidden></div>
+        <div class="form-actions">
+          <button type="submit" class="btn-primary" id="goalSaveBtn">Save</button>
+          <button type="button" class="btn-ghost" id="goalCancelBtn">Cancel</button>
+        </div>
+      </form>
+
+      <div id="goalsEmpty" class="empty-note" hidden>No goals yet — add one to start tracking a target.</div>
+      <ul id="goalList" class="activity-list"></ul>
     </section>
 
     <!-- PAGE: PLANNER -->
@@ -262,6 +312,6 @@
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
-<script src="app.js?v=27"></script>
+<script src="app.js?v=29"></script>
 </body>
 </html>

@@ -412,6 +412,7 @@
         activities = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         renderHomeActivities();
         renderActivitiesPage();
+        renderGoalsPage();
         populateActivitySelect(document.getElementById('logActivityId'));
         renderTimerBanner(); // activity names/goal may have changed
         if(currentPage === 'history') renderHistoryPage();
@@ -491,6 +492,247 @@
       await activitiesCol(currentUid).doc(activity.id).delete();
     }catch(err){
       console.error('delete activity failed', err);
+      alert('Delete failed — see console.');
+    }
+  }
+
+  // ---------- GOALS ----------
+  // users/{uid}/goals/{goalId}:
+  //   { name, type: 'daily'|'weekly', targetMinutes, workingDays: [dayKey,...],
+  //     activityIds: [...], sortOrder, createdAt }
+  // Daily goal: targetMinutes is per working day; the weekly target is derived
+  // (daily x number of working days) and never stored. Weekly goal:
+  // targetMinutes is the weekly total and workingDays is unused. Results are
+  // always computed from time entries, never stored, so past weeks recalc if
+  // entries or goals change.
+  function goalsCol(uid){ return db.collection('users').doc(uid).collection('goals'); }
+
+  let goals = [];
+  let unsubscribeGoals = null;
+
+  function sortedGoals(){
+    return [...goals].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+  }
+
+  const DAY_SHORT = { monday:'Mon', tuesday:'Tue', wednesday:'Wed', thursday:'Thu', friday:'Fri', saturday:'Sat', sunday:'Sun' };
+
+  function goalWorkingDays(goal){
+    return DAY_KEYS.filter(d => (goal.workingDays || []).includes(d));
+  }
+  function goalWeeklyTargetMinutes(goal){
+    return goal.type === 'daily' ? goal.targetMinutes * goalWorkingDays(goal).length : goal.targetMinutes;
+  }
+
+  // "Every day", "Mon–Fri", "Mon, Wed, Fri".
+  function fmtWorkingDays(days){
+    if(days.length === 7) return 'Every day';
+    const idx = days.map(d => DAY_KEYS.indexOf(d));
+    const consecutive = idx.length > 2 && idx.every((v, i) => i === 0 || v === idx[i - 1] + 1);
+    if(consecutive) return `${DAY_SHORT[days[0]]}–${DAY_SHORT[days[days.length - 1]]}`;
+    return days.map(d => DAY_SHORT[d]).join(', ');
+  }
+
+  function goalSummary(goal){
+    if(goal.type === 'daily'){
+      const days = goalWorkingDays(goal);
+      return `${fmtDuration(goal.targetMinutes)}/day · ${fmtWorkingDays(days)} · ${fmtDuration(goalWeeklyTargetMinutes(goal))}/week`;
+    }
+    return `${fmtDuration(goal.targetMinutes)}/week`;
+  }
+
+  // Scores one goal for one Monday–Sunday week. weekMondayStr is the week's
+  // Monday as YYYY-MM-DD. Each day's time comes from entries whose `date` is
+  // that day (a timed entry is dated the day it started). The weekly total
+  // counts every day Mon–Sun, working or not; daily hit/miss is only judged on
+  // working days. Extra time on one day never carries over to another.
+  function scoreGoalForWeek(goal, weekMondayStr, entries){
+    const monday = new Date(weekMondayStr + 'T00:00:00');
+    const ids = new Set(goal.activityIds || []);
+    const working = new Set(goalWorkingDays(goal));
+    const days = DAY_KEYS.map((dayKey, i) => {
+      const d = new Date(monday); d.setDate(monday.getDate() + i);
+      const date = dateToStr(d);
+      const minutes = entries
+        .filter(e => e.date === date && ids.has(e.activityId))
+        .reduce((sum, e) => sum + e.durationMinutes, 0);
+      const isWorking = goal.type === 'daily' && working.has(dayKey);
+      return { dayKey, date, minutes, isWorking, hit: isWorking ? minutes >= goal.targetMinutes : null };
+    });
+    const weeklyMinutes = days.reduce((sum, d) => sum + d.minutes, 0);
+    const weeklyTarget = goalWeeklyTargetMinutes(goal);
+    const workingDays = days.filter(d => d.isWorking);
+    return {
+      days, weeklyMinutes, weeklyTarget,
+      weeklyHit: weeklyMinutes >= weeklyTarget,
+      workingDayCount: workingDays.length,
+      daysHit: workingDays.filter(d => d.hit).length,
+    };
+  }
+
+  function renderGoalsPage(){
+    const list = document.getElementById('goalList');
+    list.innerHTML = '';
+    document.getElementById('goalsEmpty').hidden = goals.length > 0;
+    sortedGoals().forEach(g => {
+      const names = (g.activityIds || []).map(id => activities.find(a => a.id === id)).filter(Boolean).map(a => a.name);
+      const li = document.createElement('li');
+      li.className = 'activity-item';
+      li.innerHTML = `
+        <div class="activity-item-top">
+          <div>
+            <div class="name">${escapeHtml(g.name)}</div>
+            <div class="goal-summary">${escapeHtml(goalSummary(g))}</div>
+            <div class="goal-activities">${names.length ? escapeHtml(names.join(', ')) : 'No activities assigned'}</div>
+          </div>
+          <div class="item-right">
+            <div class="item-actions">
+              <button class="icon-btn edit-btn" data-id="${g.id}" title="Edit" type="button">✎</button>
+              <button class="icon-btn danger delete-btn" data-id="${g.id}" title="Delete" type="button">✕</button>
+            </div>
+          </div>
+        </div>
+      `;
+      list.appendChild(li);
+    });
+  }
+
+  function startGoalsListener(uid){
+    if(unsubscribeGoals) unsubscribeGoals();
+    unsubscribeGoals = goalsCol(uid).orderBy('createdAt').onSnapshot(
+      snap => {
+        goals = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        renderGoalsPage();
+      },
+      err => {
+        console.error('goals listener failed', err);
+        showConnectionError('Firestore connection failed — see console.');
+      }
+    );
+  }
+
+  // ---------- goal add/edit form ----------
+  const goalFormEl = document.getElementById('goalForm');
+  const goalErrorEl = document.getElementById('goalFormError');
+  let goalFormType = 'daily';
+
+  function setGoalFormError(msg){
+    if(msg){ goalErrorEl.textContent = msg; goalErrorEl.hidden = false; }
+    else { goalErrorEl.hidden = true; goalErrorEl.textContent = ''; }
+  }
+
+  function goalFormTargetMinutes(){
+    const h = parseInt(document.getElementById('goalHours').value, 10) || 0;
+    const m = parseInt(document.getElementById('goalMinutes').value, 10) || 0;
+    return h * 60 + m;
+  }
+  function goalFormSelectedDays(){
+    return DAY_KEYS.filter(d => document.querySelector(`#goalDayChips input[value="${d}"]`).checked);
+  }
+
+  // The "4 hr × 6 days = 24 hr per week" line under the working days.
+  function updateGoalWeekTotal(){
+    const el = document.getElementById('goalWeekTotal');
+    const mins = goalFormTargetMinutes();
+    const n = goalFormSelectedDays().length;
+    if(goalFormType !== 'daily' || mins <= 0 || n === 0){ el.textContent = ''; return; }
+    el.textContent = `${fmtDuration(mins)} × ${n} ${n === 1 ? 'day' : 'days'} = ${fmtDuration(mins * n)} per week`;
+  }
+
+  function setGoalFormType(type){
+    goalFormType = type;
+    document.getElementById('goalTypeDailyBtn').classList.toggle('is-active', type === 'daily');
+    document.getElementById('goalTypeWeeklyBtn').classList.toggle('is-active', type === 'weekly');
+    document.getElementById('goalTargetLabel').textContent = type === 'daily' ? 'Daily target' : 'Weekly target';
+    document.getElementById('goalDaysField').hidden = type !== 'daily';
+    updateGoalWeekTotal();
+  }
+
+  function openGoalForm(goal){
+    setGoalFormError(null);
+    document.getElementById('goalFormId').value = goal ? goal.id : '';
+    document.getElementById('goalName').value = goal ? goal.name : '';
+    const mins = goal ? goal.targetMinutes : 0;
+    document.getElementById('goalHours').value = mins ? Math.floor(mins / 60) : '';
+    document.getElementById('goalMinutes').value = mins % 60 ? mins % 60 : '';
+    // New daily goals start on Mon–Fri; change as needed.
+    const days = goal ? goalWorkingDays(goal) : ['monday','tuesday','wednesday','thursday','friday'];
+    document.getElementById('goalDayChips').innerHTML = DAY_KEYS.map(d => `
+      <label class="day-chip"><input type="checkbox" value="${d}" ${days.includes(d) ? 'checked' : ''}><span>${DAY_SHORT[d]}</span></label>`).join('');
+    const picked = new Set(goal ? goal.activityIds || [] : []);
+    document.getElementById('goalActivityChecks').innerHTML = sortedActivities().map(a => `
+      <label class="check-row"><input type="checkbox" value="${a.id}" ${picked.has(a.id) ? 'checked' : ''}><span>${escapeHtml(a.name)}</span></label>`).join('');
+    setGoalFormType(goal ? goal.type : 'daily');
+    goalFormEl.hidden = false;
+    document.getElementById('goalName').focus();
+  }
+
+  function closeGoalForm(){
+    goalFormEl.hidden = true;
+    setGoalFormError(null);
+  }
+
+  document.getElementById('addGoalBtn').addEventListener('click', ()=> openGoalForm(null));
+  document.getElementById('goalCancelBtn').addEventListener('click', closeGoalForm);
+  document.getElementById('goalTypeDailyBtn').addEventListener('click', ()=> setGoalFormType('daily'));
+  document.getElementById('goalTypeWeeklyBtn').addEventListener('click', ()=> setGoalFormType('weekly'));
+  document.getElementById('goalHours').addEventListener('input', updateGoalWeekTotal);
+  document.getElementById('goalMinutes').addEventListener('input', updateGoalWeekTotal);
+  document.getElementById('goalDayChips').addEventListener('change', updateGoalWeekTotal);
+
+  goalFormEl.addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    if(!currentUid) return;
+    const name = document.getElementById('goalName').value.trim();
+    const targetMinutes = goalFormTargetMinutes();
+    const workingDays = goalFormSelectedDays();
+    const activityIds = [...document.querySelectorAll('#goalActivityChecks input:checked')].map(i => i.value);
+    if(!name){ setGoalFormError('Name is required.'); return; }
+    if(targetMinutes <= 0){ setGoalFormError('Enter a target greater than zero.'); return; }
+    if(goalFormType === 'daily' && workingDays.length === 0){ setGoalFormError('Choose at least one working day.'); return; }
+    if(activityIds.length === 0){ setGoalFormError('Choose at least one activity.'); return; }
+
+    const fields = {
+      name, type: goalFormType, targetMinutes, activityIds,
+      workingDays: goalFormType === 'daily' ? workingDays : [],
+    };
+    const id = document.getElementById('goalFormId').value;
+    const saveBtn = document.getElementById('goalSaveBtn');
+    saveBtn.disabled = true;
+    try{
+      if(id){
+        await goalsCol(currentUid).doc(id).update(fields);
+      } else {
+        await goalsCol(currentUid).add({
+          ...fields, sortOrder: Date.now(),
+          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+      closeGoalForm();
+    }catch(err){
+      console.error('save goal failed', err);
+      setGoalFormError('Save failed — see console.');
+    }finally{
+      saveBtn.disabled = false;
+    }
+  });
+
+  document.getElementById('goalList').addEventListener('click', (e)=>{
+    const editBtn = e.target.closest('.edit-btn');
+    const delBtn = e.target.closest('.delete-btn');
+    const g = goals.find(x => x.id === (editBtn || delBtn || {dataset:{}}).dataset.id);
+    if(!g) return;
+    if(editBtn) openGoalForm(g);
+    else deleteGoal(g);
+  });
+
+  // Deleting a goal removes only the goal; activities and logged time are untouched.
+  async function deleteGoal(goal){
+    const ok = confirm(`Delete the goal "${goal.name}"? Your activities and logged time are not affected.`);
+    if(!ok) return;
+    try{
+      await goalsCol(currentUid).doc(goal.id).delete();
+    }catch(err){
+      console.error('delete goal failed', err);
       alert('Delete failed — see console.');
     }
   }
@@ -1585,7 +1827,7 @@
   }, true);
 
   // ---------- page navigation ----------
-  const PAGES = ['home', 'activities', 'planner', 'logtime', 'history', 'settings'];
+  const PAGES = ['home', 'activities', 'goals', 'planner', 'logtime', 'history', 'settings'];
   let currentPage = 'home';
   let intendedPage = 'home';   // set the instant navigation starts (see onHomePage)
   let pendingLogTimePreset = null;
@@ -1663,6 +1905,7 @@
       startPeriodEntriesListener(user.uid);
       startAllEntriesListener(user.uid);
       startTimerListener(user.uid);
+      startGoalsListener(user.uid);
       startSchedulesListener(user.uid);
       startSettingsListener(user.uid);
       periodRolloverIntervalHandle = setInterval(checkForPeriodRollover, 60 * 1000);
@@ -1684,6 +1927,7 @@
       allEntries = [];
       activeTimer = null;
       schedules = [];
+      goals = [];
       editingScheduleId = null;
       currentSettings = {};
       if(unsubscribeActivities){ unsubscribeActivities(); unsubscribeActivities = null; }
@@ -1691,6 +1935,7 @@
       if(unsubscribePeriodEntries){ unsubscribePeriodEntries(); unsubscribePeriodEntries = null; }
       if(unsubscribeAllEntries){ unsubscribeAllEntries(); unsubscribeAllEntries = null; }
       if(unsubscribeTimer){ unsubscribeTimer(); unsubscribeTimer = null; }
+      if(unsubscribeGoals){ unsubscribeGoals(); unsubscribeGoals = null; }
       if(unsubscribeSchedules){ unsubscribeSchedules(); unsubscribeSchedules = null; }
       if(unsubscribeSettings){ unsubscribeSettings(); unsubscribeSettings = null; }
       if(timerTickHandle){ clearInterval(timerTickHandle); timerTickHandle = null; }
@@ -1698,6 +1943,7 @@
       if(periodRolloverIntervalHandle){ clearInterval(periodRolloverIntervalHandle); periodRolloverIntervalHandle = null; }
       if(homeSortable){ homeSortable.destroy(); homeSortable = null; }
       closeActivityForm();
+      closeGoalForm();
       closeAssignModal();
       closeStopModal();
       releaseKeepAwake();
