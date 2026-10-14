@@ -33,24 +33,15 @@
   // gettable/settable location while staying under users/{uid}/**, which
   // the existing security rule already covers.
 
-  // scheduleRule: null means "active every week". The one rule type built so
-  // far is { type: "firstFullWeekOfMonth" }; more types can be added later
-  // by extending weekMatchesScheduleRule without touching this shape.
-  //
-  // Note: older activity docs may still carry a minSessionMinutes field from
-  // the retired countdown-then-count-up timer. Nothing reads or writes it
-  // anymore; it's left in Firestore untouched until the user decides whether
-  // to clean it up.
+  // Activities no longer have goals of their own — an activity is just a name
+  // you track time against (goals are a separate concept, assigned activities).
+  // Older activity docs may still carry cadence, goalMinutes, scheduleRule and
+  // minSessionMinutes fields from earlier versions. Nothing reads or writes
+  // them anymore; they're left in Firestore untouched until the user decides
+  // whether to clean them up.
   const SEED_ACTIVITIES = [
-    { name: 'Video ideas & notes',       cadence: 'daily',   goalMinutes: 90, scheduleRule: null },
-    { name: 'Video recording & editing', cadence: 'daily',   goalMinutes: 90, scheduleRule: null },
-    { name: 'Newsletter',                cadence: 'weekly',  goalMinutes: 60, scheduleRule: null },
-    { name: 'ASMR Healing',              cadence: 'weekly',  goalMinutes: 60, scheduleRule: null },
-    { name: 'Story',                     cadence: 'weekly',  goalMinutes: 60, scheduleRule: null },
-    { name: 'Household needs',           cadence: 'weekly',  goalMinutes: 60, scheduleRule: null },
-    { name: 'Learning',                  cadence: 'weekly',  goalMinutes: 60, scheduleRule: null },
-    { name: 'Budget',                    cadence: 'monthly', goalMinutes: 60, scheduleRule: null },
-    { name: 'Budget Review',             cadence: 'weekly',  goalMinutes: 60, scheduleRule: { type: 'firstFullWeekOfMonth' } },
+    'Video ideas & notes', 'Video recording & editing', 'Newsletter', 'ASMR Healing',
+    'Story', 'Household needs', 'Learning', 'Budget', 'Budget Review',
   ];
 
   function activitiesCol(uid){ return db.collection('users').doc(uid).collection('activities'); }
@@ -64,13 +55,10 @@
     const snap = await activitiesCol(uid).limit(1).get();
     if(!snap.empty) return;
     const batch = db.batch();
-    SEED_ACTIVITIES.forEach((a, idx) => {
+    SEED_ACTIVITIES.forEach((name, idx) => {
       const ref = activitiesCol(uid).doc();
       batch.set(ref, {
-        name: a.name,
-        cadence: a.cadence,
-        goalMinutes: a.goalMinutes,
-        scheduleRule: a.scheduleRule,
+        name,
         sortOrder: idx,
         active: true,
         createdAt: firebase.firestore.FieldValue.serverTimestamp(),
@@ -79,34 +67,12 @@
     await batch.commit();
   }
 
-  // Adds "Budget Review" to accounts that already existed before this
-  // feature shipped (seedActivitiesIfEmpty only fires for brand-new,
-  // fully-empty accounts). Matches by name, so it's safe to call every
-  // sign-in without duplicating the row. sortOrder: Date.now() lands it
-  // after any small-integer sortOrder without needing a count query.
-  async function ensureBudgetReviewSeeded(uid){
-    const seed = SEED_ACTIVITIES.find(a => a.name === 'Budget Review');
-    const snap = await activitiesCol(uid).where('name', '==', seed.name).limit(1).get();
-    if(!snap.empty) return;
-    await activitiesCol(uid).add({
-      name: seed.name,
-      cadence: seed.cadence,
-      goalMinutes: seed.goalMinutes,
-      scheduleRule: seed.scheduleRule,
-      sortOrder: Date.now(),
-      active: true,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-    });
-  }
-
-  // One-time migration for activities created before drag-reordering
-  // existed: assigns sortOrder based on the old cadence+name sort, so
-  // nothing visually jumps the first time this runs. No-ops forever after,
-  // once every activity has a real sortOrder.
+  // Safety net for any activity doc that somehow lacks a sortOrder: gives
+  // them one (alphabetical) so the shared drag order always has a value.
+  // No-ops once every activity has a real sortOrder.
   async function backfillSortOrderIfNeeded(uid, docs){
     if(!docs.some(d => typeof d.sortOrder !== 'number')) return;
-    const ordered = [...docs].sort((a, b) =>
-      CADENCE_ORDER[a.cadence] - CADENCE_ORDER[b.cadence] || a.name.localeCompare(b.name));
+    const ordered = [...docs].sort((a, b) => a.name.localeCompare(b.name));
     const batch = db.batch();
     ordered.forEach((d, idx) => batch.update(activitiesCol(uid).doc(d.id), { sortOrder: idx }));
     await batch.commit();
@@ -128,11 +94,6 @@
     else { el.hidden = true; el.textContent = ''; }
   }
 
-  function fmtHours(goalMinutes){
-    const hrs = goalMinutes / 60;
-    return (hrs % 1 === 0 ? hrs : hrs.toFixed(2).replace(/0+$/,'').replace(/\.$/,''));
-  }
-
   // The one display format for durations: "45 min", "1 hr 30 min", "4 hr".
   // Whole minutes only; exact hours omit the "0 min". (Live stopwatch-style
   // readouts like the running timer stay H:MM:SS — those are clocks, not
@@ -143,11 +104,6 @@
     const h = Math.floor(mins / 60);
     const m = mins % 60;
     return m === 0 ? `${h} hr` : `${h} hr ${m} min`;
-  }
-
-  function goalLabel(goalMinutes, cadence){
-    const per = cadence === 'daily' ? 'day' : cadence === 'weekly' ? 'week' : 'month';
-    return `${fmtDuration(goalMinutes)} / ${per}`;
   }
 
   function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -222,16 +178,11 @@
     const dowMonBased = (now.getDay() + 6) % 7; // 0=Mon ... 6=Sun
     const monday = new Date(now); monday.setDate(now.getDate() - dowMonBased);
     const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
-    const monthStart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
-    const lastDayNum = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
-    const monthEnd = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(lastDayNum).padStart(2,'0')}`;
     return {
       today: dateToStr(now),
       weekStart: dateToStr(monday),
       weekEnd: dateToStr(sunday),
-      monthStart, monthEnd,
       daysLeftInWeek: 7 - dowMonBased,
-      daysLeftInMonth: lastDayNum - now.getDate() + 1,
     };
   }
   let periodBounds = computePeriodBounds();
@@ -265,23 +216,19 @@
   }
   document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) checkForPeriodRollover(); });
 
-  function periodLabel(cadence){
-    return cadence === 'daily' ? 'today' : cadence === 'weekly' ? 'this week' : 'this month';
-  }
-
-  function loggedMinutesFor(activityId, cadence){
+  // Time tracked on an activity this week (Monday–Sunday, local time).
+  function loggedMinutesThisWeek(activityId){
     const b = periodBounds;
-    const start = cadence === 'daily' ? b.today : cadence === 'weekly' ? b.weekStart : b.monthStart;
-    const end = cadence === 'daily' ? b.today : cadence === 'weekly' ? b.weekEnd : b.monthEnd;
     return periodEntries
-      .filter(e => e.activityId === activityId && e.date >= start && e.date <= end)
+      .filter(e => e.activityId === activityId && e.date >= b.weekStart && e.date <= b.weekEnd)
       .reduce((sum, e) => sum + e.durationMinutes, 0);
   }
 
-  // ---------- scheduled weekly activities ----------
-  // A weekly activity can carry a scheduleRule limiting which week(s) it's
-  // active in. null = every week. Add new rule types as new `case`s in
-  // weekMatchesScheduleRule — the activity doc shape doesn't need to change.
+  // ---------- week schedule rules ----------
+  // Retired from activities (they no longer have goals or schedules); kept
+  // here because a goal can optionally use a rule, e.g. "only the first full
+  // week of the month". Add new rule types as new `case`s in
+  // weekMatchesScheduleRule.
   function firstFullWeekMondayOfMonth(year, monthIndex){
     const firstOfMonth = new Date(year, monthIndex, 1);
     const dowMonBased = (firstOfMonth.getDay() + 6) % 7; // 0=Mon ... 6=Sun
@@ -297,26 +244,14 @@
         return dateToStr(weekStartDate) === dateToStr(target);
       }
       default:
-        return true; // unrecognized rule types stay visible rather than silently vanishing
+        return true; // unrecognized rule types stay active rather than silently vanishing
     }
-  }
-
-  function isActivityVisibleThisWeek(activity){
-    if(activity.cadence !== 'weekly' || !activity.scheduleRule) return true;
-    const weekStartDate = new Date(periodBounds.weekStart + 'T00:00:00');
-    return weekMatchesScheduleRule(activity.scheduleRule, weekStartDate);
-  }
-
-  function scheduleRuleLabel(rule){
-    if(rule.type === 'firstFullWeekOfMonth') return 'Only in the first full week of the month';
-    return 'Scheduled';
   }
 
   // ---------- shared activity state ----------
   let currentUid = null;
   let activities = [];        // kept in sync via onSnapshot
   let unsubscribeActivities = null;
-  const CADENCE_ORDER = { daily: 0, weekly: 1, monthly: 2 };
 
   // User-controlled order (drag-reordered on the home screen), shared across
   // Home/Activities/History so position stays consistent everywhere.
@@ -377,13 +312,9 @@
   function renderHomeActivities(){
     const list = document.getElementById('homeActivityList');
     list.innerHTML = '';
-    const visible = sortedActivities().filter(isActivityVisibleThisWeek);
-    visible.forEach(a => {
-      const logged = loggedMinutesFor(a.id, a.cadence);
-      const pct = Math.min(100, Math.round(logged / a.goalMinutes * 100));
-      const done = logged >= a.goalMinutes;
-      const isDouble = logged >= a.goalMinutes * 2;
-      const fillClass = isDouble ? ' is-over' : done ? ' is-full' : '';
+    // Every activity, every week: name, time tracked this week, Timer button.
+    sortedActivities().forEach(a => {
+      const logged = loggedMinutesThisWeek(a.id);
       const li = document.createElement('li');
       li.className = 'activity-item home-activity-item';
       li.dataset.id = a.id;
@@ -391,14 +322,13 @@
         <div class="activity-item-top">
           <div>
             <div class="name">${escapeHtml(a.name)}</div>
-            <div class="meta">${fmtDuration(logged)} / ${fmtDuration(a.goalMinutes)} ${periodLabel(a.cadence)}${done ? ' ✓' : ''}</div>
+            <div class="meta">${fmtDuration(logged)} this week</div>
           </div>
           <div class="home-row-right">
             <button class="btn-pill-icon timer-row-btn" data-id="${a.id}" type="button"${activeTimer ? ' disabled' : ''}>▶ Timer</button>
             <div class="drag-handle" title="Drag to reorder">⠿</div>
           </div>
         </div>
-        <div class="progress-track"><div class="progress-fill${fillClass}" style="width:${pct}%"></div></div>
       `;
       list.appendChild(li);
     });
@@ -446,17 +376,12 @@
     sortedActivities().forEach(a => {
       const li = document.createElement('li');
       li.className = 'activity-item';
-      const scheduleNote = a.scheduleRule
-        ? `<div class="schedule-note">${escapeHtml(scheduleRuleLabel(a.scheduleRule))}</div>` : '';
       li.innerHTML = `
         <div class="activity-item-top">
           <div>
             <div class="name">${escapeHtml(a.name)}</div>
-            <div class="meta">${goalLabel(a.goalMinutes, a.cadence)}</div>
-            ${scheduleNote}
           </div>
           <div class="item-right">
-            <span class="cadence-tag ${a.cadence}">${a.cadence}</span>
             <div class="item-actions">
               <button class="icon-btn edit-btn" data-id="${a.id}" title="Edit" type="button">✎</button>
               <button class="icon-btn danger delete-btn" data-id="${a.id}" title="Delete" type="button">✕</button>
@@ -503,8 +428,6 @@
   const formEl = document.getElementById('activityForm');
   const formIdEl = document.getElementById('formActivityId');
   const formNameEl = document.getElementById('formName');
-  const formCadenceEl = document.getElementById('formCadence');
-  const formGoalHoursEl = document.getElementById('formGoalHours');
   const formErrorEl = document.getElementById('formError');
 
   function setFormError(msg){
@@ -517,13 +440,9 @@
     if(activity){
       formIdEl.value = activity.id;
       formNameEl.value = activity.name;
-      formCadenceEl.value = activity.cadence;
-      formGoalHoursEl.value = fmtHours(activity.goalMinutes);
     } else {
       formIdEl.value = '';
       formNameEl.value = '';
-      formCadenceEl.value = 'daily';
-      formGoalHoursEl.value = '';
     }
     formEl.hidden = false;
     formNameEl.focus();
@@ -541,21 +460,18 @@
     e.preventDefault();
     if(!currentUid) return;
     const name = formNameEl.value.trim();
-    const cadence = formCadenceEl.value;
-    const goalHours = parseFloat(formGoalHoursEl.value);
     if(!name){ setFormError('Name is required.'); return; }
-    if(!goalHours || goalHours <= 0){ setFormError('Goal must be a positive number of hours.'); return; }
 
-    const goalMinutes = Math.round(goalHours * 60);
     const id = formIdEl.value;
     const saveBtn = document.getElementById('formSaveBtn');
     saveBtn.disabled = true;
     try{
       if(id){
-        await activitiesCol(currentUid).doc(id).update({ name, cadence, goalMinutes });
+        // Only the name changes; any old goal/cadence fields on the doc are left alone.
+        await activitiesCol(currentUid).doc(id).update({ name });
       } else {
         await activitiesCol(currentUid).add({
-          name, cadence, goalMinutes, active: true, scheduleRule: null, sortOrder: Date.now(),
+          name, active: true, sortOrder: Date.now(),
           createdAt: firebase.firestore.FieldValue.serverTimestamp(),
         });
       }
@@ -942,8 +858,7 @@
     if(unsubscribePeriodEntries) unsubscribePeriodEntries();
     periodBounds = computePeriodBounds();
     renderHomeHeader();
-    const earliest = periodBounds.weekStart < periodBounds.monthStart ? periodBounds.weekStart : periodBounds.monthStart;
-    unsubscribePeriodEntries = timeEntriesCol(uid).where('date', '>=', earliest).onSnapshot(
+    unsubscribePeriodEntries = timeEntriesCol(uid).where('date', '>=', periodBounds.weekStart).onSnapshot(
       snap => {
         periodEntries = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         renderHomeActivities();
@@ -1106,10 +1021,10 @@
     return dateToStr(mondayOfDateStr(dateToStr(activity.createdAt.toDate())));
   }
 
-  function weekAppliesToActivity(activity, weekMondayStr, createdWeekStr){
-    if(createdWeekStr && weekMondayStr < createdWeekStr) return false;
-    if(activity.cadence !== 'weekly' || !activity.scheduleRule) return true;
-    return weekMatchesScheduleRule(activity.scheduleRule, new Date(weekMondayStr + 'T00:00:00'));
+  // A week counts for an activity once the activity exists. (No per-activity
+  // schedule rule anymore — every week since creation counts, zeros included.)
+  function weekAppliesToActivity(weekMondayStr, createdWeekStr){
+    return !(createdWeekStr && weekMondayStr < createdWeekStr);
   }
 
   function renderHistoryPage(){
@@ -1154,7 +1069,7 @@
 
     sortedActivities().forEach(a => {
       const createdWeekStr = activityCreatedWeekMonday(a);
-      const applicableWeeks = weekMondays.filter(w => weekAppliesToActivity(a, w, createdWeekStr));
+      const applicableWeeks = weekMondays.filter(w => weekAppliesToActivity(w, createdWeekStr));
       const totals = applicableWeeks.map(w => weekTotalMinutes(a.id, w));
       const high = totals.length ? Math.max(...totals) : null;
       const low = totals.length ? Math.min(...totals) : null;
@@ -1163,7 +1078,7 @@
       html += `<tr><td class="hist-activity-col">${escapeHtml(a.name)}</td>`;
       html += `<td>${high === null ? '–' : fmtDuration(high)}</td><td>${low === null ? '–' : fmtDuration(low)}</td><td>${avg === null ? '–' : fmtDuration(avg)}</td>`;
       weekMondays.forEach(w => {
-        if(!weekAppliesToActivity(a, w, createdWeekStr)){ html += '<td class="hist-na">–</td>'; return; }
+        if(!weekAppliesToActivity(w, createdWeekStr)){ html += '<td class="hist-na">–</td>'; return; }
         html += `<td>${fmtDuration(weekTotalMinutes(a.id, w))}</td>`;
       });
       html += '</tr>';
@@ -1267,8 +1182,11 @@
     catch(err){ console.error('resume failed', err); alert('Could not resume — see console.'); }
   });
 
-  function isTimerStale(activity, activeMs){
-    return !!activity && activeMs > activity.goalMinutes * 60000 * 2;
+  // One fixed limit for every activity: more than 4 hours of ACTIVE time
+  // (paused time doesn't count) and we ask whether you forgot to stop it.
+  const STALE_TIMER_MS = 4 * 60 * 60 * 1000;
+  function isTimerStale(activeMs){
+    return activeMs > STALE_TIMER_MS;
   }
 
   function tickTimerBanner(){
@@ -1276,14 +1194,13 @@
     const now = Date.now();
     const paused = timerStatus(activeTimer) === 'paused';
     const activeMs = timerActiveMs(activeTimer, now);
-    const activity = activities.find(a => a.id === activeTimer.activityId);
 
     timerElapsedEl.textContent = fmtHMS(activeMs);
     if(paused){
       timerPausedLineEl.textContent = `Paused for ${fmtElapsed(now - (activeTimer.pausedAt ?? now))}`;
     }
 
-    const stale = !paused && isTimerStale(activity, activeMs);
+    const stale = !paused && isTimerStale(activeMs);
     timerWarningEl.hidden = !stale;
     timerBannerEl.classList.toggle('is-stale', stale);
   }
@@ -1375,10 +1292,9 @@
   function openStopModal(){
     if(!activeTimer) return;
     const activeMs = timerActiveMs(activeTimer);
-    const activity = activities.find(a => a.id === activeTimer.activityId);
     stopModalSummaryEl.textContent =
       `${activityName(activeTimer.activityId)} — started ${fmt12h(msToHHMM(activeTimer.startTime))}, ${fmtElapsed(activeMs)} active.`;
-    stopModalWarningEl.hidden = !isTimerStale(activity, activeMs);
+    stopModalWarningEl.hidden = !isTimerStale(activeMs);
     stopEditEndTimeEl.value = nowTimeStr();
     showStopChoice();
     stopModalEl.hidden = false;
@@ -1754,7 +1670,6 @@
       (async ()=>{
         try{
           await seedActivitiesIfEmpty(user.uid);
-          await ensureBudgetReviewSeeded(user.uid); // sequenced after: avoids racing a duplicate write on brand-new accounts
           await ensureSettingsDoc(user.uid);
         }catch(e){
           console.error('Firestore seeding failed', e);
