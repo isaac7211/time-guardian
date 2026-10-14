@@ -1280,8 +1280,7 @@
 
     timerElapsedEl.textContent = fmtHMS(activeMs);
     if(paused){
-      timerPausedLineEl.textContent =
-        `Paused for ${fmtElapsed(now - (activeTimer.pausedAt ?? now))} — ${fmtElapsed(activeMs)} active so far.`;
+      timerPausedLineEl.textContent = `Paused for ${fmtElapsed(now - (activeTimer.pausedAt ?? now))}`;
     }
 
     const stale = !paused && isTimerStale(activity, activeMs);
