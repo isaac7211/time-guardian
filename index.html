@@ -11,7 +11,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=41">
+<link rel="stylesheet" href="styles.css?v=42">
 </head>
 <body>
 <div id="app">
@@ -360,7 +360,11 @@
   <div id="assignModal" class="modal-backdrop" hidden>
     <div class="modal-card">
       <h3 class="modal-title">Add to <span id="assignModalDayPart">—</span></h3>
-      <label class="form-label">Activity
+      <div class="mode-toggle">
+        <button type="button" class="mode-btn is-active" id="assignKindActivityBtn">Activity</button>
+        <button type="button" class="mode-btn" id="assignKindGoalBtn">Goal</button>
+      </div>
+      <label class="form-label"><span id="assignSelectLabel">Activity</span>
         <select id="assignActivityId" class="form-input"></select>
       </label>
       <label class="form-label">Minutes (optional)
@@ -380,6 +384,6 @@
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
-<script src="app.js?v=41"></script>
+<script src="app.js?v=42"></script>
 </body>
 </html>

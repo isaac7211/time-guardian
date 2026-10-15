@@ -344,7 +344,7 @@
         .map(part => ({ part, items: (schedule.days && schedule.days[day] && schedule.days[day][part]) || [] }))
         .filter(p => p.items.length);
       const partsHtml = parts.length
-        ? parts.map(p => `<div class="home-plan-part"><span class="home-plan-part-label">${DAYPART_LABELS[p.part]}:</span> ${p.items.map(it => `${escapeHtml(activityName(it.activityId))}${plannerItemTime(it) ? ' ' + plannerItemTime(it) : ''}`).join(', ')}</div>`).join('')
+        ? parts.map(p => `<div class="home-plan-part"><span class="home-plan-part-label">${DAYPART_LABELS[p.part]}:</span> ${p.items.map(it => `${escapeHtml(plannerItemName(it))}${plannerItemIsGoal(it) ? ' (goal)' : ''}${plannerItemTime(it) ? ' ' + plannerItemTime(it) : ''}`).join(', ')}</div>`).join('')
         : '<div class="home-plan-part empty">Nothing planned</div>';
       return `
         <div class="home-plan-day">
@@ -1205,6 +1205,18 @@
     return (typeof item.minutes === 'number' && item.minutes > 0) ? fmtDuration(item.minutes) : '';
   }
 
+  // A day-part item is either an activity ({ activityId }) or a goal
+  // ({ goalId }), each with an optional `minutes`. A goal that's since been
+  // deleted shows as "(deleted goal)", like deleted activities do.
+  function plannerItemIsGoal(item){ return !!item.goalId; }
+  function plannerItemName(item){
+    if(plannerItemIsGoal(item)){
+      const g = goals.find(x => x.id === item.goalId);
+      return g ? g.name : '(deleted goal)';
+    }
+    return activityName(item.activityId);
+  }
+
   function emptyScheduleDays(){
     const days = {};
     DAY_KEYS.forEach(d => { days[d] = { morning: [], afternoon: [], evening: [] }; });
@@ -1317,7 +1329,7 @@
       const partsHtml = DAYPART_KEYS.map(part => {
         const items = (schedule.days && schedule.days[day] && schedule.days[day][part]) || [];
         const chips = items.map((item, idx) => `
-          <span class="planner-chip">${escapeHtml(activityName(item.activityId))}${plannerItemTime(item) ? ' · ' + plannerItemTime(item) : ''}
+          <span class="planner-chip${plannerItemIsGoal(item) ? ' is-goal' : ''}">${plannerItemIsGoal(item) ? '<span class="planner-chip-tag">Goal</span> ' : ''}${escapeHtml(plannerItemName(item))}${plannerItemTime(item) ? ' · ' + plannerItemTime(item) : ''}
             <button class="chip-remove" data-day="${day}" data-part="${part}" data-idx="${idx}" title="Remove" type="button">✕</button>
           </span>
         `).join('');
@@ -1373,10 +1385,26 @@
     else { assignErrorEl.hidden = true; assignErrorEl.textContent = ''; }
   }
 
+  let assignKind = 'activity';
+  function setAssignKind(kind){
+    assignKind = kind;
+    document.getElementById('assignKindActivityBtn').classList.toggle('is-active', kind === 'activity');
+    document.getElementById('assignKindGoalBtn').classList.toggle('is-active', kind === 'goal');
+    document.getElementById('assignSelectLabel').textContent = kind === 'goal' ? 'Goal' : 'Activity';
+    if(kind === 'goal'){
+      assignActivityEl.innerHTML = sortedGoals().map(g => `<option value="${g.id}">${escapeHtml(g.name)}</option>`).join('');
+    } else {
+      populateActivitySelect(assignActivityEl);
+    }
+    setAssignError(null);
+  }
+  document.getElementById('assignKindActivityBtn').addEventListener('click', ()=> setAssignKind('activity'));
+  document.getElementById('assignKindGoalBtn').addEventListener('click', ()=> setAssignKind('goal'));
+
   function openAssignModal(day, part){
     assignTargetDay = day; assignTargetPart = part;
     assignModalDayPartEl.textContent = `${DAY_LABELS[day]} · ${DAYPART_LABELS[part]}`;
-    populateActivitySelect(assignActivityEl);
+    setAssignKind('activity');
     assignMinutesEl.value = '';
     setAssignError(null);
     assignModalEl.hidden = false;
@@ -1388,11 +1416,11 @@
     if(!currentUid) return;
     const schedule = schedules.find(s => s.id === editingScheduleId);
     if(!schedule) return;
-    const activityId = assignActivityEl.value;
-    if(!activityId){ setAssignError('Add an activity first.'); return; }
+    const chosenId = assignActivityEl.value;
+    if(!chosenId){ setAssignError(assignKind === 'goal' ? 'Add a goal first.' : 'Add an activity first.'); return; }
     // Time is optional: blank saves a plain note with no time at all.
     const raw = assignMinutesEl.value.trim();
-    const item = { activityId };
+    const item = assignKind === 'goal' ? { goalId: chosenId } : { activityId: chosenId };
     if(assignMinutesEl.validity.badInput){ setAssignError('That isn’t a number. Enter minutes, or leave it blank.'); return; }
     if(raw !== ''){
       const minutes = Number(raw);

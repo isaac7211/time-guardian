@@ -843,3 +843,7 @@ header{
 .detail-row.is-vacation .detail-status{ color: var(--blue); }
 .detail-foot{ margin-top: 12px; font-size: 13.5px; color: var(--text-dim); line-height: 1.6; }
 .detail-foot strong{ color: var(--text); }
+
+/* PLANNER: GOAL ITEMS */
+.planner-chip.is-goal{ border-color: var(--sage); }
+.planner-chip-tag{ font-size: 10px; font-weight:700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--sage); }
