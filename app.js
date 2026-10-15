@@ -106,6 +106,39 @@
     return m === 0 ? `${h} hr` : `${h} hr ${m} min`;
   }
 
+  // ---------- number fields: select the whole value on focus ----------
+  // One shared behavior for every <input type="number"> (including fields
+  // created later), via delegated listeners, so tapping in lets you type a new
+  // number straight away. Browsers fight this in different ways: desktop
+  // Safari/Chrome clear the selection on mouseup, and iOS Safari places the
+  // caret after touchend, so we select on focus, re-select shortly after
+  // (while still focused), and again on the click/touch that follows the
+  // focus. Only taps right after focusing are intercepted; once you're in the
+  // field, later taps place the caret normally.
+  let freshNumberFocus = null;
+  let freshNumberFocusTimer = null;
+  const isNumberField = el => !!(el && el.matches && el.matches('input[type="number"]'));
+  function selectNumberField(el){
+    if(document.activeElement !== el) return;
+    try{ el.select(); }catch(e){ /* not selectable in this browser; nothing to do */ }
+  }
+  document.addEventListener('focusin', e => {
+    const el = e.target;
+    if(!isNumberField(el)) return;
+    freshNumberFocus = el;
+    clearTimeout(freshNumberFocusTimer);
+    freshNumberFocusTimer = setTimeout(()=>{ freshNumberFocus = null; }, 700);
+    selectNumberField(el);
+    requestAnimationFrame(()=> selectNumberField(el));
+    [0, 60, 200].forEach(ms => setTimeout(()=> selectNumberField(el), ms));
+  }, true);
+  document.addEventListener('mouseup', e => {
+    if(e.target === freshNumberFocus){ e.preventDefault(); selectNumberField(e.target); }
+  }, true);
+  ['touchend', 'click'].forEach(type => document.addEventListener(type, e => {
+    if(e.target === freshNumberFocus) selectNumberField(e.target);
+  }, true));
+
   function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
   const WEEKDAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
