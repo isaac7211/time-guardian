@@ -810,3 +810,14 @@ header{
 .activity-item.sortable-chosen, .goal-card.sortable-chosen{ border-color: var(--sage); }
 .activity-item.sortable-ghost, .goal-card.sortable-ghost{ opacity: 0.35; }
 .activity-item.sortable-drag, .goal-card.sortable-drag{ box-shadow: 0 10px 28px rgba(0,0,0,0.45); }
+
+/* HISTORY: GOALS TABLE */
+.history-block{ margin-bottom: 22px; }
+.hist-main{ font-weight:500; color: var(--text); }
+.hist-sub{ font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+.hist-vac{ font-size: 11px; color: var(--blue); margin-top: 2px; }
+.history-table td.hist-cell-good{ background: var(--sage-dim); }
+.history-table td.hist-cell-mid{ background: var(--amber-dim); }
+.history-table td.hist-cell-bad{ background: var(--coral-dim); }
+.history-table td.hist-cell-vac{ background: var(--blue-dim); }
+.hist-cell-vac .hist-main{ color: var(--blue); }

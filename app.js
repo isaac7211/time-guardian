@@ -790,6 +790,7 @@
         renderGoalsPage();
         renderHomeGoals();
         renderVacationList();
+        if(currentPage === 'history') renderHistoryPage();
       },
       err => {
         console.error('goals listener failed', err);
@@ -1664,6 +1665,72 @@
     return !(createdWeekStr && weekMondayStr < createdWeekStr);
   }
 
+  // Goal results per completed week, using the same Mon–Sun maths as Home
+  // (scoreGoalForWeek), so vacations, reduced targets and skipped weeks agree
+  // everywhere. Weeks before a goal existed show "–" (not counted). The
+  // Overall column covers every counted week since the goal was created, not
+  // just the columns in view; fully-vacation weeks are left out of it.
+  function renderHistoryGoals(weekMondays){
+    const block = document.getElementById('historyGoalsBlock');
+    const titleEl = document.getElementById('historyActivitiesTitle');
+    const list = sortedGoals();
+    block.hidden = list.length === 0;
+    titleEl.hidden = list.length === 0;   // the "Activities" label only when there are two tables
+    if(!list.length) return;
+
+    const weekEntries = {};
+    weekMondays.forEach(w => {
+      const end = new Date(w + 'T00:00:00'); end.setDate(end.getDate() + 6);
+      const endStr = dateToStr(end);
+      weekEntries[w] = allEntries.filter(e => e.date >= w && e.date <= endStr);
+    });
+
+    let html = '<thead><tr><th class="hist-activity-col">Goal</th><th>Overall</th>';
+    weekMondays.forEach(w => {
+      const m = new Date(w + 'T00:00:00');
+      html += `<th>${MONTHS_SHORT[m.getMonth()]} ${m.getDate()}</th>`;
+    });
+    html += '</tr></thead><tbody>';
+
+    list.forEach(g => {
+      const createdWeek = activityCreatedWeekMonday(g);
+      const results = weekMondays.map(w => weekAppliesToActivity(w, createdWeek) ? scoreGoalForWeek(g, w, weekEntries[w], vacations) : null);
+      const counted = results.filter(r => r && !r.skipped);
+      const weeksMet = counted.filter(r => r.weeklyHit).length;
+      const daysHit = counted.reduce((n, r) => n + r.daysHit, 0);
+      const daysScored = counted.reduce((n, r) => n + r.workingDayCount, 0);
+
+      html += `<tr><td class="hist-activity-col">${escapeHtml(g.name)}</td>`;
+      if(!counted.length){
+        html += '<td class="hist-na">–</td>';
+      } else {
+        html += `<td><div class="hist-main">${weeksMet} of ${counted.length} wks</div>${g.type === 'daily' ? `<div class="hist-sub">${daysHit} of ${daysScored} days</div>` : ''}</td>`;
+      }
+      results.forEach(r => {
+        if(!r){ html += '<td class="hist-na">–</td>'; return; }
+        if(r.skipped){
+          html += `<td class="hist-cell-vac"><div class="hist-main">Vacation</div><div class="hist-sub">${fmtDuration(r.weeklyMinutes)}</div></td>`;
+          return;
+        }
+        const total = `${fmtDuration(r.weeklyMinutes)} / ${fmtDuration(r.weeklyTarget)}`;
+        const offDays = r.days.filter(d => d.onVacation && (g.type !== 'daily' || d.isWorking)).length;
+        const vac = offDays ? `<div class="hist-vac">🌴 ${offDays} off</div>` : '';
+        let main, cls;
+        if(g.type === 'daily'){
+          main = `${r.daysHit} of ${r.workingDayCount} days`;
+          cls = r.daysHit === r.workingDayCount ? 'good' : (r.daysHit === 0 ? 'bad' : 'mid');
+        } else {
+          main = r.weeklyHit ? '✓' : '✗';
+          cls = r.weeklyHit ? 'good' : 'bad';
+        }
+        html += `<td class="hist-cell-${cls}"><div class="hist-main">${main}</div><div class="hist-sub">${total}</div>${vac}</td>`;
+      });
+      html += '</tr>';
+    });
+    html += '</tbody>';
+    document.getElementById('historyGoalsTable').innerHTML = html;
+  }
+
   function renderHistoryPage(){
     const tableEl = document.getElementById('historyTable');
     const emptyEl = document.getElementById('historyEmpty');
@@ -1672,7 +1739,11 @@
     const lastWeekMonday = new Date(currentMonday); lastWeekMonday.setDate(currentMonday.getDate() - 7);
     const lastWeekStr = dateToStr(lastWeekMonday);
 
+    const goalsBlockEl = document.getElementById('historyGoalsBlock');
+    const activitiesTitleEl = document.getElementById('historyActivitiesTitle');
+
     if(!allEntries.length){
+      goalsBlockEl.hidden = true; activitiesTitleEl.hidden = true;
       tableEl.innerHTML = '';
       emptyEl.hidden = false;
       emptyEl.textContent = 'No completed weeks yet.';
@@ -1683,6 +1754,7 @@
     const earliestMondayStr = dateToStr(mondayOfDateStr(earliestEntryDate));
 
     if(earliestMondayStr > lastWeekStr){
+      goalsBlockEl.hidden = true; activitiesTitleEl.hidden = true;
       tableEl.innerHTML = '';
       emptyEl.hidden = false;
       emptyEl.textContent = 'No completed weeks yet — check back after this week ends.';
@@ -1696,6 +1768,8 @@
       weekMondays.push(dateToStr(cursor));
       cursor.setDate(cursor.getDate() - 7);
     }
+
+    renderHistoryGoals(weekMondays);
 
     let html = '<thead><tr><th class="hist-activity-col">Activity</th><th>High</th><th>Low</th><th>Avg</th>';
     weekMondays.forEach(w => {
