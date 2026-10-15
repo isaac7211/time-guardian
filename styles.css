@@ -799,3 +799,6 @@ header{
 .strip-cell.is-vacation{ background: var(--blue-dim); }
 .strip-cell.is-vacation .strip-icon{ font-size: 9.5px; font-weight:500; line-height: 2.3; color: var(--blue); }
 .section-title + .section-block{ margin-top: 16px; }
+
+.goal-vacation-note{ flex-basis:100%; font-size: 12px; font-weight:500; color: var(--blue); margin-top: 6px; }
+#homeGoalResults > .goal-result-line{ flex-wrap: wrap; }

@@ -627,6 +627,28 @@
       </div>`;
   }
 
+  // "Wed–Fri, Sun" from a list of day keys (Mon-first order).
+  function fmtDayRanges(keys){
+    const idx = DAY_KEYS.map((d, i) => keys.includes(d) ? i : -1).filter(i => i >= 0);
+    const runs = [];
+    idx.forEach(i => {
+      const last = runs[runs.length - 1];
+      if(last && last[1] === i - 1) last[1] = i; else runs.push([i, i]);
+    });
+    return runs.map(([a, b]) => a === b ? DAY_SHORT[DAY_KEYS[a]] : `${DAY_SHORT[DAY_KEYS[a]]}–${DAY_SHORT[DAY_KEYS[b]]}`).join(', ');
+  }
+
+  // Small line under a goal's result when any day this week is on vacation.
+  function vacationNoteHtml(g, r){
+    const off = r.days.filter(d => d.onVacation).map(d => d.dayKey);
+    if(!off.length) return '';
+    let text = off.length === 7 ? 'Vacation all week' : `Vacation: ${fmtDayRanges(off)}`;
+    if(g.type !== 'daily' && !r.skipped && r.weeklyTarget !== g.targetMinutes){
+      text += ` · target reduced to ${fmtDuration(r.weeklyTarget)}`;
+    }
+    return `<div class="goal-vacation-note">🌴 ${text}</div>`;
+  }
+
   function renderHomeGoals(){
     const box = document.getElementById('homeGoals');
     const resultsBox = document.getElementById('homeGoalResults');
@@ -668,7 +690,7 @@
       const totalCls = r.weeklyHit ? ' is-reached' : '';
       if(g.type !== 'daily'){
         const right = r.skipped ? 'Vacation' : `${fmtDuration(r.weeklyMinutes)} / ${fmtDuration(r.weeklyTarget)}${r.weeklyHit ? ' ✓' : ''}`;
-        return `<div class="goal-result-line"><span>${escapeHtml(g.name)}</span><span class="goal-result-total${totalCls}">${right}</span></div>`;
+        return `<div class="goal-result-line"><span>${escapeHtml(g.name)}</span><span class="goal-result-total${totalCls}">${right}</span>${vacationNoteHtml(g, r)}</div>`;
       }
       const cells = r.days.map(d => {
         let icon, cls;
@@ -691,6 +713,7 @@
             <span class="goal-result-total${totalCls}">${r.skipped ? fmtDuration(r.weeklyMinutes) : `${fmtDuration(r.weeklyMinutes)} / ${fmtDuration(r.weeklyTarget)}`}</span>
           </div>
           <div class="day-strip">${cells}</div>
+          ${vacationNoteHtml(g, r)}
         </div>`;
     }).join('');
   }
