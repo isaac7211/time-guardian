@@ -821,3 +821,25 @@ header{
 .history-table td.hist-cell-bad{ background: var(--coral-dim); }
 .history-table td.hist-cell-vac{ background: var(--blue-dim); }
 .hist-cell-vac .hist-main{ color: var(--blue); }
+
+/* HISTORY: WEEK DETAIL */
+.history-table td.hist-tap{ cursor:pointer; }
+.history-table td.hist-tap:active{ filter: brightness(1.25); }
+.detail-rows{ margin-top: 12px; }
+.detail-row{
+  display:grid;
+  grid-template-columns: 1fr auto 78px;
+  gap: 10px;
+  align-items:baseline;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13.5px;
+}
+.detail-day{ color: var(--text); }
+.detail-time{ color: var(--text-dim); text-align:right; }
+.detail-status{ font-size: 12px; text-align:right; color: var(--text-faint); }
+.detail-row.is-hit .detail-status{ color: var(--sage); }
+.detail-row.is-miss .detail-status{ color: var(--coral); }
+.detail-row.is-vacation .detail-status{ color: var(--blue); }
+.detail-foot{ margin-top: 12px; font-size: 13.5px; color: var(--text-dim); line-height: 1.6; }
+.detail-foot strong{ color: var(--text); }

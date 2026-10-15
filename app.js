@@ -1706,10 +1706,11 @@
       } else {
         html += `<td><div class="hist-main">${weeksMet} of ${counted.length} wks</div>${g.type === 'daily' ? `<div class="hist-sub">${daysHit} of ${daysScored} days</div>` : ''}</td>`;
       }
-      results.forEach(r => {
+      results.forEach((r, i) => {
+        const tap = `data-goal="${g.id}" data-week="${weekMondays[i]}"`;
         if(!r){ html += '<td class="hist-na">–</td>'; return; }
         if(r.skipped){
-          html += `<td class="hist-cell-vac"><div class="hist-main">Vacation</div><div class="hist-sub">${fmtDuration(r.weeklyMinutes)}</div></td>`;
+          html += `<td class="hist-cell-vac hist-tap" ${tap}><div class="hist-main">Vacation</div><div class="hist-sub">${fmtDuration(r.weeklyMinutes)}</div></td>`;
           return;
         }
         const total = `${fmtDuration(r.weeklyMinutes)} / ${fmtDuration(r.weeklyTarget)}`;
@@ -1723,7 +1724,7 @@
           main = r.weeklyHit ? '✓' : '✗';
           cls = r.weeklyHit ? 'good' : 'bad';
         }
-        html += `<td class="hist-cell-${cls}"><div class="hist-main">${main}</div><div class="hist-sub">${total}</div>${vac}</td>`;
+        html += `<td class="hist-cell-${cls} hist-tap" ${tap}><div class="hist-main">${main}</div><div class="hist-sub">${total}</div>${vac}</td>`;
       });
       html += '</tr>';
     });
@@ -1790,13 +1791,102 @@
       html += `<td>${high === null ? '–' : fmtDuration(high)}</td><td>${low === null ? '–' : fmtDuration(low)}</td><td>${avg === null ? '–' : fmtDuration(avg)}</td>`;
       weekMondays.forEach(w => {
         if(!weekAppliesToActivity(w, createdWeekStr)){ html += '<td class="hist-na">–</td>'; return; }
-        html += `<td>${fmtDuration(weekTotalMinutes(a.id, w))}</td>`;
+        html += `<td class="hist-tap" data-activity="${a.id}" data-week="${w}">${fmtDuration(weekTotalMinutes(a.id, w))}</td>`;
       });
       html += '</tr>';
     });
     html += '</tbody>';
     tableEl.innerHTML = html;
   }
+
+  // ---------- History: tap a week cell for its Mon–Sun breakdown ----------
+  const historyDetailEl = document.getElementById('historyDetailModal');
+
+  function weekEntriesFor(weekMondayStr){
+    const end = new Date(weekMondayStr + 'T00:00:00'); end.setDate(end.getDate() + 6);
+    const endStr = dateToStr(end);
+    return allEntries.filter(e => e.date >= weekMondayStr && e.date <= endStr);
+  }
+  function fmtWeekRange(weekMondayStr){
+    const a = new Date(weekMondayStr + 'T00:00:00');
+    const b = new Date(a); b.setDate(a.getDate() + 6);
+    return `${MONTHS_SHORT[a.getMonth()]} ${a.getDate()} – ${MONTHS_SHORT[b.getMonth()]} ${b.getDate()}`;
+  }
+  function dayLabel(dateStr, dayKey){
+    const d = new Date(dateStr + 'T00:00:00');
+    return `${DAY_SHORT[dayKey]}, ${MONTHS_SHORT[d.getMonth()]} ${d.getDate()}`;
+  }
+
+  function showHistoryDetail(title, weekMondayStr, rows, footLines){
+    document.getElementById('historyDetailTitle').textContent = title;
+    document.getElementById('historyDetailSub').textContent = `Week of ${fmtWeekRange(weekMondayStr)}`;
+    document.getElementById('historyDetailRows').innerHTML = rows.map(r => `
+      <div class="detail-row${r.cls ? ' ' + r.cls : ''}">
+        <span class="detail-day">${escapeHtml(r.label)}</span>
+        <span class="detail-time">${escapeHtml(r.time)}</span>
+        <span class="detail-status">${escapeHtml(r.status || '')}</span>
+      </div>`).join('');
+    document.getElementById('historyDetailFoot').innerHTML = footLines.map(l => `<div>${l}</div>`).join('');
+    historyDetailEl.hidden = false;
+  }
+  function closeHistoryDetail(){ historyDetailEl.hidden = true; }
+
+  function openGoalWeekDetail(goalId, weekMondayStr){
+    const g = goals.find(x => x.id === goalId);
+    if(!g) return;
+    const r = scoreGoalForWeek(g, weekMondayStr, weekEntriesFor(weekMondayStr), vacations);
+    const rows = r.days.map(d => {
+      let status = '', cls = '';
+      if(g.type === 'daily'){
+        if(!d.isWorking){ status = 'Day off'; cls = 'is-off'; }
+        else if(d.onVacation){ status = 'Vacation'; cls = 'is-vacation'; }
+        else if(d.hit){ status = '✓ Hit'; cls = 'is-hit'; }
+        else { status = '✗ Missed'; cls = 'is-miss'; }
+      } else if(d.onVacation){ status = 'Vacation'; cls = 'is-vacation'; }
+      return { label: dayLabel(d.date, d.dayKey), time: d.minutes ? fmtDuration(d.minutes) : '–', status, cls };
+    });
+    const foot = [];
+    if(r.skipped){
+      foot.push(`<strong>Vacation week</strong> — not scored`);
+      foot.push(`${fmtDuration(r.weeklyMinutes)} tracked`);
+    } else {
+      foot.push(`<strong>Week total:</strong> ${fmtDuration(r.weeklyMinutes)} / ${fmtDuration(r.weeklyTarget)}${r.weeklyHit ? ' ✓' : ''}`);
+      if(g.type === 'daily') foot.push(`${r.daysHit} of ${r.workingDayCount} days hit`);
+      if(g.type !== 'daily' && r.weeklyTarget !== g.targetMinutes) foot.push(`Target reduced from ${fmtDuration(g.targetMinutes)} for days off`);
+    }
+    showHistoryDetail(g.name, weekMondayStr, rows, foot);
+  }
+
+  function openActivityWeekDetail(activityId, weekMondayStr){
+    const monday = new Date(weekMondayStr + 'T00:00:00');
+    const entries = weekEntriesFor(weekMondayStr).filter(e => e.activityId === activityId);
+    const rows = DAY_KEYS.map((dayKey, i) => {
+      const d = new Date(monday); d.setDate(monday.getDate() + i);
+      const date = dateToStr(d);
+      const mins = entries.filter(e => e.date === date).reduce((sum, e) => sum + e.durationMinutes, 0);
+      return { label: dayLabel(date, dayKey), time: mins ? fmtDuration(mins) : '–' };
+    });
+    const total = entries.reduce((sum, e) => sum + e.durationMinutes, 0);
+    showHistoryDetail(activityName(activityId), weekMondayStr, rows, [`<strong>Week total:</strong> ${fmtDuration(total)}`]);
+  }
+
+  function onHistoryCellTap(e){
+    const td = e.target.closest('td[data-week]');
+    if(!td) return;
+    if(td.dataset.goal) openGoalWeekDetail(td.dataset.goal, td.dataset.week);
+    else if(td.dataset.activity) openActivityWeekDetail(td.dataset.activity, td.dataset.week);
+  }
+  document.getElementById('historyGoalsTable').addEventListener('click', onHistoryCellTap);
+  document.getElementById('historyTable').addEventListener('click', onHistoryCellTap);
+
+  // Same dismissals as the Stop pop-up: X, tap outside, Escape.
+  let historyPressOnBackdrop = false;
+  historyDetailEl.addEventListener('pointerdown', e => { historyPressOnBackdrop = (e.target === historyDetailEl); });
+  historyDetailEl.addEventListener('click', e => {
+    if(e.target === historyDetailEl && historyPressOnBackdrop) closeHistoryDetail();
+  });
+  document.getElementById('historyDetailClose').addEventListener('click', closeHistoryDetail);
+  document.addEventListener('keydown', e => { if(e.key === 'Escape' && !historyDetailEl.hidden) closeHistoryDetail(); });
 
   // ---------- timer: shared state across devices ----------
   // users/{uid}/meta/activeTimer is a single doc; its absence means no
@@ -2470,6 +2560,7 @@
       hideToast();
       closeAssignModal();
       closeStopModal();
+      closeHistoryDetail();
       releaseKeepAwake();
       document.getElementById('appShell').hidden = true;
       document.getElementById('screen-signin').hidden = false;
