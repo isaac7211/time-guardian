@@ -106,6 +106,24 @@
     return m === 0 ? `${h} hr` : `${h} hr ${m} min`;
   }
 
+  // ---------- undo is turned off ----------
+  // The app has no Undo button or shortcut of its own. These switch off what
+  // the browser/OS adds on top: Cmd/Ctrl+Z (and redo/Ctrl+Y), and the
+  // "historyUndo"/"historyRedo" edit that the Edit menu and iOS shake-to-undo
+  // send into text fields (tested on an iPhone simulator: choosing Undo from
+  // the shake prompt leaves the text untouched).
+  // What a page can't do: iOS still shows its "Undo Typing" prompt when the
+  // phone is shaken in a field you've typed in — it just does nothing now.
+  // Removing the prompt itself is an iPhone setting
+  // (Settings > Accessibility > Touch > Shake to Undo).
+  document.addEventListener('keydown', e => {
+    const k = (e.key || '').toLowerCase();
+    if((e.metaKey || e.ctrlKey) && !e.altKey && (k === 'z' || k === 'y')) e.preventDefault();
+  }, true);
+  document.addEventListener('beforeinput', e => {
+    if(e.inputType === 'historyUndo' || e.inputType === 'historyRedo') e.preventDefault();
+  }, true);
+
   // ---------- number fields: select the whole value on focus ----------
   // One shared behavior for every <input type="number"> (including fields
   // created later), via delegated listeners, so tapping in lets you type a new
@@ -1151,7 +1169,6 @@
       const ref = await vacationsCol(currentUid).add({ ...fields, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
       showToast(`${label} marked as a day off for all goals.`, [
         { label: 'Choose goals', fn: ()=>{ navigateTo('settings'); openVacationForm({ id: ref.id, ...fields }); } },
-        { label: 'Undo', fn: ()=> ref.delete().catch(err => console.error('undo day off failed', err)) },
       ]);
     }catch(err){
       console.error('day off failed', err);
