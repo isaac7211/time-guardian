@@ -11,7 +11,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=42">
+<link rel="stylesheet" href="styles.css?v=43">
 </head>
 <body>
 <div id="app">
@@ -74,28 +74,27 @@
     <section id="page-home" class="page">
       <div class="home-header">
         <div class="home-date" id="homeDate">—</div>
-        <div class="home-remaining" id="homeRemaining">—</div>
       </div>
 
-      <!-- Goals: today/week progress per goal, with a Timer button for each
-           assigned activity. -->
+      <!-- Goals: today/week progress per goal (daily goals also show their
+           Mon–Sun strip), with the assigned activities and their Timer
+           buttons folded away until you tap to expand. -->
+      <div class="section-block">
+        <h3 class="section-subtitle">Goals</h3>
+        <div id="homeGoals"></div>
+      </div>
+
+      <!-- This week, Monday to Sunday: what was tracked each day plus the
+           default schedule's Planner items. Add/edit lives on the Planner page. -->
       <div class="section-block">
         <div class="home-goals-header">
-          <h3 class="section-subtitle">Goals</h3>
+          <h3 class="section-subtitle" id="homePlanTitle">This week's plan</h3>
           <button class="btn-pill-icon day-off-toggle" id="dayOffToggle" type="button" hidden>Day off</button>
         </div>
         <div class="day-off-menu" id="dayOffMenu" hidden>
           <button class="btn-ghost" id="dayOffToday" type="button">Today</button>
           <button class="btn-ghost" id="dayOffYesterday" type="button">Yesterday</button>
         </div>
-        <div id="homeGoals"></div>
-      </div>
-
-      <!-- Read-only rolling view of the active schedule's remaining days
-           this week — no add/edit/delete here, that's the Planner page. -->
-      <div class="section-block">
-        <h3 class="section-subtitle" id="homePlanTitle">This week's plan</h3>
-        <div id="homeGoalResults"></div>
         <div id="homePlanDays"></div>
       </div>
 
@@ -384,6 +383,6 @@
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
-<script src="app.js?v=42"></script>
+<script src="app.js?v=43"></script>
 </body>
 </html>

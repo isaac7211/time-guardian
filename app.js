@@ -242,10 +242,6 @@
     const now = new Date();
     document.getElementById('homeDate').textContent =
       `${WEEKDAYS[now.getDay()]}, ${MONTHS_SHORT[now.getMonth()]} ${now.getDate()}`;
-    const b = periodBounds;
-    const weekWord = b.daysLeftInWeek === 1 ? 'day' : 'days';
-    document.getElementById('homeRemaining').textContent =
-      `${b.daysLeftInWeek} ${weekWord} left this week`;
   }
 
   // periodBounds is a snapshot of "now" taken when listeners start (sign-in
@@ -322,38 +318,71 @@
   }
 
   // ---------- PAGE: HOME ----------
-  // Read-only "this week's plan": the active (default) schedule's remaining
-  // days, today first. As the day advances the list shrinks toward Sunday;
-  // once a new week starts it's back to all 7 days, using whichever
-  // schedule is currently the default (usually the same one, unchanged).
+  // "This week's plan": all seven days, Monday to Sunday, all week. Each day
+  // shows what was tracked (total + per activity) and, if there's a default
+  // schedule, its Planner items. Today and later days start open; past days
+  // start collapsed (tap a day to open or close it). Goal progress and the
+  // per-day hit/miss strip live on the goal cards, not here.
+  const dayCardOpen = new Map();   // date -> true/false overrides the default
+  function dayCardIsOpen(date){
+    return dayCardOpen.has(date) ? dayCardOpen.get(date) : date >= periodBounds.today;
+  }
+
   function renderHomePlan(){
     const titleEl = document.getElementById('homePlanTitle');
     const daysEl = document.getElementById('homePlanDays');
     const schedule = schedules.find(s => s.id === currentSettings.defaultScheduleId);
-    if(!schedule){
-      titleEl.textContent = "This week's plan";
-      daysEl.innerHTML = '<div class="empty-note">No default schedule set — pick one in Planner.</div>';
-      return;
-    }
-    titleEl.textContent = `This week's plan · ${schedule.name}`;
-    const dowMonBased = (new Date().getDay() + 6) % 7; // 0=Mon ... 6=Sun
-    const remainingDays = DAY_KEYS.slice(dowMonBased);
-    daysEl.innerHTML = remainingDays.map((day, i) => {
-      const isToday = i === 0;
+    titleEl.textContent = schedule ? `This week's plan · ${schedule.name}` : "This week's plan";
+    const today = periodBounds.today;
+    const monday = new Date(periodBounds.weekStart + 'T00:00:00');
+    const noSchedule = schedule ? '' : '<div class="empty-note">No default schedule set — pick one in Planner.</div>';
+
+    daysEl.innerHTML = noSchedule + DAY_KEYS.map((day, i) => {
+      const d = new Date(monday); d.setDate(monday.getDate() + i);
+      const date = dateToStr(d);
+      const isToday = date === today, isPast = date < today;
+      const open = dayCardIsOpen(date);
+
+      const dayEntries = periodEntries.filter(e => e.date === date);
+      const total = dayEntries.reduce((sum, e) => sum + e.durationMinutes, 0);
+      const perActivity = sortedActivities()
+        .map(a => ({ a, mins: dayEntries.filter(e => e.activityId === a.id).reduce((sum, e) => sum + e.durationMinutes, 0) }))
+        .filter(x => x.mins > 0);
+
       const parts = DAYPART_KEYS
-        .map(part => ({ part, items: (schedule.days && schedule.days[day] && schedule.days[day][part]) || [] }))
+        .map(part => ({ part, items: (schedule && schedule.days && schedule.days[day] && schedule.days[day][part]) || [] }))
         .filter(p => p.items.length);
-      const partsHtml = parts.length
-        ? parts.map(p => `<div class="home-plan-part"><span class="home-plan-part-label">${DAYPART_LABELS[p.part]}:</span> ${p.items.map(it => `${escapeHtml(plannerItemName(it))}${plannerItemIsGoal(it) ? ' (goal)' : ''}${plannerItemTime(it) ? ' ' + plannerItemTime(it) : ''}`).join(', ')}</div>`).join('')
-        : '<div class="home-plan-part empty">Nothing planned</div>';
+
+      let body = '';
+      if(perActivity.length){
+        body += `<div class="home-plan-part"><span class="home-plan-part-label">Tracked:</span> ${perActivity.map(x => `${escapeHtml(x.a.name)} ${fmtDuration(x.mins)}`).join(' · ')}</div>`;
+      } else if(isPast){
+        body += '<div class="home-plan-part empty">Nothing tracked</div>';
+      }
+      body += parts.map(p => `<div class="home-plan-part"><span class="home-plan-part-label">${DAYPART_LABELS[p.part]}:</span> ${p.items.map(it => `${escapeHtml(plannerItemName(it))}${plannerItemIsGoal(it) ? ' (goal)' : ''}${plannerItemTime(it) ? ' ' + plannerItemTime(it) : ''}`).join(', ')}</div>`).join('');
+      if(!perActivity.length && !parts.length && !isPast){
+        body += '<div class="home-plan-part empty">Nothing planned</div>';
+      }
+
       return `
-        <div class="home-plan-day">
-          <div class="home-plan-day-title">${DAY_LABELS[day]}${isToday ? '<span class="home-plan-today-tag">Today</span>' : ''}</div>
-          ${partsHtml}
+        <div class="home-plan-day${isToday ? ' is-today' : ''}${isPast ? ' is-past' : ''}">
+          <button class="plan-day-head" type="button" data-date="${date}" aria-expanded="${open}">
+            <span class="plan-day-chevron">${open ? '▾' : '▸'}</span>
+            <span class="home-plan-day-title">${DAY_LABELS[day]}, ${MONTHS_SHORT[d.getMonth()]} ${d.getDate()}${isToday ? '<span class="home-plan-today-tag">Today</span>' : ''}</span>
+            <span class="plan-day-total">${date <= today ? (total ? fmtDuration(total) : '–') : ''}</span>
+          </button>
+          ${open ? `<div class="plan-day-body">${body}</div>` : ''}
         </div>
       `;
     }).join('');
   }
+
+  document.getElementById('homePlanDays').addEventListener('click', e => {
+    const head = e.target.closest('.plan-day-head');
+    if(!head) return;
+    dayCardOpen.set(head.dataset.date, !dayCardIsOpen(head.dataset.date));
+    renderHomePlan();
+  });
 
   // Drag-to-reorder. One shared order for activities (every list that shows
   // them) and one for goals, stored as `sortOrder` on each doc, so reordering
@@ -688,23 +717,24 @@
     return m === 0 ? `${h}h` : `${h}h ${m}m`;
   }
 
-  // One progress row: label, "done / target", left/reached status, bar.
+  // One progress row, kept to two thin lines so several goal cards fit on
+  // screen: label + left/reached status + "done / target", then the bar.
   // Bar: sage while in progress, white once full, blue only at double the target.
   function goalProgressHtml(label, minutes, target){
     const reached = minutes >= target;
     const over = minutes - target;
     const status = !reached
       ? `${fmtDuration(target - minutes)} left`
-      : `Goal reached ✓${over > 0 ? ` · ${fmtDuration(over)} over` : ''}`;
+      : (over > 0 ? `✓ ${fmtDuration(over)} over` : '✓ Goal reached');
     const pct = Math.min(100, (minutes / target) * 100);
     const cls = minutes >= target * 2 ? ' is-over' : (reached ? ' is-full' : '');
     return `
       <div class="goal-progress">
         <div class="goal-progress-line">
           <span class="goal-progress-label">${label}</span>
+          <span class="goal-progress-status${reached ? ' is-reached' : ''}">${status}</span>
           <span class="goal-progress-amount">${fmtDuration(minutes)} / ${fmtDuration(target)}</span>
         </div>
-        <div class="goal-progress-status${reached ? ' is-reached' : ''}">${status}</div>
         <div class="progress-track"><div class="progress-fill${cls}" style="width:${pct}%"></div></div>
       </div>`;
   }
@@ -731,16 +761,37 @@
     return `<div class="goal-vacation-note">🌴 ${text}</div>`;
   }
 
+  // Which goal cards have their activity list open (kept across re-renders).
+  const expandedGoalCards = new Set();
+
+  // Mon–Sun strip for one daily goal (✓ hit, ✗ miss, ● today pending, off, Vacation).
+  function goalStripHtml(r, today){
+    const cells = r.days.map(d => {
+      let icon, cls;
+      if(!d.isWorking){ icon = 'off'; cls = 'is-off'; }
+      else if(d.onVacation){ icon = 'Vacation'; cls = 'is-vacation'; }
+      else if(d.hit){ icon = '✓'; cls = 'is-hit'; }
+      else if(d.date < today){ icon = '✗'; cls = 'is-miss'; }
+      else if(d.date === today){ icon = '●'; cls = 'is-pending'; }
+      else { icon = '·'; cls = 'is-future'; }
+      return `<div class="strip-cell ${cls}${d.date === today ? ' is-today' : ''}">
+        <div class="strip-day">${DAY_SHORT[d.dayKey]}</div>
+        <div class="strip-icon">${icon}</div>
+        <div class="strip-time">${fmtDurationShort(d.minutes)}</div>
+      </div>`;
+    }).join('');
+    return `<div class="day-strip">${cells}</div>`;
+  }
+
   function renderHomeGoals(){
     if(deferIfDragging()) return;
     const box = document.getElementById('homeGoals');
-    const resultsBox = document.getElementById('homeGoalResults');
-    if(!box || !resultsBox) return;
+    if(!box) return;
     const list = sortedGoals();
     renderDayOffMenu();
     if(!list.length){
       box.innerHTML = '<div class="empty-note">No goals yet — add one on the Goals page.</div>';
-      resultsBox.innerHTML = '';
+      renderHomePlan();
       return;
     }
     const today = periodBounds.today;
@@ -755,52 +806,34 @@
         if(!t || !t.isWorking) progress = textRow('Today', 'Not a working day');
         else if(t.onVacation) progress = textRow('Today', 'Vacation');
         else progress = goalProgressHtml('Today', t.minutes, g.targetMinutes);
-        progress += weekRow;
+        progress += weekRow + goalStripHtml(r, today);
       } else {
         progress = weekRow;
       }
-      const acts = goalActivities(g);
-      const actsHtml = acts.map(a => `
-        <div class="goal-activity-row">
-          <span class="goal-activity-name">${escapeHtml(a.name)}</span>
-          <button class="btn-pill-icon timer-row-btn" data-id="${a.id}" type="button"${activeTimer ? ' disabled' : ''}>▶ Timer</button>
-        </div>`).join('');
-      return `<div class="goal-card" data-id="${g.id}"><div class="goal-card-head"><div class="goal-card-name">${escapeHtml(g.name)}</div><div class="drag-handle" title="Drag to reorder">⠿</div></div>${progress}<div class="goal-activity-list">${actsHtml}</div></div>`;
-    }).join('');
+      progress += vacationNoteHtml(g, r);
 
-    // Results: daily goals get a Mon–Sun strip; each weekly goal is one line.
-    resultsBox.innerHTML = scored.map(({ g, r }) => {
-      const totalCls = r.weeklyHit ? ' is-reached' : '';
-      if(g.type !== 'daily'){
-        const right = r.skipped ? 'Vacation' : `${fmtDuration(r.weeklyMinutes)} / ${fmtDuration(r.weeklyTarget)}${r.weeklyHit ? ' ✓' : ''}`;
-        return `<div class="goal-result-line"><span>${escapeHtml(g.name)}</span><span class="goal-result-total${totalCls}">${right}</span>${vacationNoteHtml(g, r)}</div>`;
-      }
-      const cells = r.days.map(d => {
-        let icon, cls;
-        if(!d.isWorking){ icon = 'off'; cls = 'is-off'; }
-        else if(d.onVacation){ icon = 'Vacation'; cls = 'is-vacation'; }
-        else if(d.hit){ icon = '✓'; cls = 'is-hit'; }
-        else if(d.date < today){ icon = '✗'; cls = 'is-miss'; }
-        else if(d.date === today){ icon = '●'; cls = 'is-pending'; }
-        else { icon = '·'; cls = 'is-future'; }
-        return `<div class="strip-cell ${cls}${d.date === today ? ' is-today' : ''}">
-          <div class="strip-day">${DAY_SHORT[d.dayKey]}</div>
-          <div class="strip-icon">${icon}</div>
-          <div class="strip-time">${fmtDurationShort(d.minutes)}</div>
-        </div>`;
-      }).join('');
-      return `
-        <div class="goal-result">
-          <div class="goal-result-line">
-            <span>${escapeHtml(g.name)} · ${r.skipped ? 'Vacation this week' : `${r.daysHit} of ${r.workingDayCount} days`}</span>
-            <span class="goal-result-total${totalCls}">${r.skipped ? fmtDuration(r.weeklyMinutes) : `${fmtDuration(r.weeklyMinutes)} / ${fmtDuration(r.weeklyTarget)}`}</span>
-          </div>
-          <div class="day-strip">${cells}</div>
-          ${vacationNoteHtml(g, r)}
-        </div>`;
+      const acts = goalActivities(g);
+      const open = expandedGoalCards.has(g.id);
+      const actsHtml = acts.length ? `
+        <button class="goal-toggle" type="button" data-id="${g.id}" aria-expanded="${open}">${open ? '▾' : '▸'} Activities · ${acts.length}</button>
+        ${open ? `<div class="goal-activity-list">${acts.map(a => `
+          <div class="goal-activity-row">
+            <span class="goal-activity-name">${escapeHtml(a.name)}</span>
+            <button class="btn-pill-icon timer-row-btn" data-id="${a.id}" type="button"${activeTimer ? ' disabled' : ''}>▶ Timer</button>
+          </div>`).join('')}</div>` : ''}` : '';
+      return `<div class="goal-card" data-id="${g.id}"><div class="goal-card-head"><div class="goal-card-name">${escapeHtml(g.name)}</div><div class="drag-handle" title="Drag to reorder">⠿</div></div>${progress}${actsHtml}</div>`;
     }).join('');
     initSortable('homeGoals', box, goalsCol);
+    renderHomePlan();
   }
+
+  document.getElementById('homeGoals').addEventListener('click', e => {
+    const toggle = e.target.closest('.goal-toggle');
+    if(!toggle) return;
+    const id = toggle.dataset.id;
+    if(expandedGoalCards.has(id)) expandedGoalCards.delete(id); else expandedGoalCards.add(id);
+    renderHomeGoals();
+  });
 
   function renderGoalsPage(){
     if(deferIfDragging()) return;
