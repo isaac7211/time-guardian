@@ -802,3 +802,11 @@ header{
 
 .goal-vacation-note{ flex-basis:100%; font-size: 12px; font-weight:500; color: var(--blue); margin-top: 6px; }
 #homeGoalResults > .goal-result-line{ flex-wrap: wrap; }
+
+/* REORDER HANDLES ON GOAL CARDS / MANAGEMENT ROWS */
+.goal-card-head{ display:flex; justify-content:space-between; align-items:center; gap: 8px; margin-bottom: 8px; }
+.goal-card-head .goal-card-name{ margin-bottom: 0; }
+.sortable-ghost{ opacity: 0.4; }
+.activity-item.sortable-chosen, .goal-card.sortable-chosen{ border-color: var(--sage); }
+.activity-item.sortable-ghost, .goal-card.sortable-ghost{ opacity: 0.35; }
+.activity-item.sortable-drag, .goal-card.sortable-drag{ box-shadow: 0 10px 28px rgba(0,0,0,0.45); }

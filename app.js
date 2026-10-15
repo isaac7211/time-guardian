@@ -266,7 +266,7 @@
 
   function populateActivitySelect(sel){
     const prevValue = sel.value;
-    sel.innerHTML = activities.map(a => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('');
+    sel.innerHTML = sortedActivities().map(a => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('');
     if(activities.some(a => a.id === prevValue)) sel.value = prevValue;
   }
 
@@ -304,12 +304,55 @@
     }).join('');
   }
 
-  // Deliberately minimal per row: name, progress, a Timer button, and a
-  // drag handle for reordering. No cadence tag, no edit/delete — those
-  // live on the Activities page.
-  let homeSortable = null;
+  // Drag-to-reorder. One shared order for activities (every list that shows
+  // them) and one for goals, stored as `sortOrder` on each doc, so reordering
+  // anywhere reorders everywhere and syncs across devices. Drag is confined to
+  // the handle so it doesn't fight Timer taps or page scrolling. Lists are
+  // rebuilt on every render, so each render re-creates its Sortable; a render
+  // that arrives mid-drag is held until the drop so it can't tear down the
+  // element being dragged.
+  const sortables = {};
+  let dragActive = false;
+  let renderAfterDrag = false;
+
+  function renderAllOrdered(){
+    renderHomeActivities(); renderHomeGoals(); renderActivitiesPage(); renderGoalsPage();
+  }
+  function deferIfDragging(){
+    if(!dragActive) return false;
+    renderAfterDrag = true;
+    return true;
+  }
+
+  function initSortable(key, listEl, colFn){
+    if(sortables[key]){ sortables[key].destroy(); delete sortables[key]; }
+    if(typeof Sortable === 'undefined' || !listEl || !listEl.children.length) return;
+    sortables[key] = new Sortable(listEl, {
+      handle: '.drag-handle',
+      animation: 150,
+      onStart: ()=>{ dragActive = true; },
+      onEnd: async (evt)=>{
+        dragActive = false;
+        if(!currentUid || evt.oldIndex === evt.newIndex){
+          if(renderAfterDrag){ renderAfterDrag = false; renderAllOrdered(); }
+          return;
+        }
+        const ids = [...listEl.children].map(el => el.dataset.id).filter(Boolean);
+        const batch = db.batch();
+        ids.forEach((id, idx) => batch.update(colFn(currentUid).doc(id), { sortOrder: idx }));
+        try{ await batch.commit(); }
+        catch(err){ console.error('save reorder failed', err); alert('Could not save the new order — see console.'); }
+        if(renderAfterDrag){ renderAfterDrag = false; renderAllOrdered(); }
+      },
+    });
+  }
+  function destroyAllSortables(){
+    Object.keys(sortables).forEach(k => { sortables[k].destroy(); delete sortables[k]; });
+  }
+
 
   function renderHomeActivities(){
+    if(deferIfDragging()) return;
     const list = document.getElementById('homeActivityList');
     list.innerHTML = '';
     // Every activity, every week: name, time tracked this week, Timer button.
@@ -332,29 +375,7 @@
       `;
       list.appendChild(li);
     });
-    initHomeDragSort();
-  }
-
-  // Drag is confined to the handle (not the whole row) so it doesn't fight
-  // the Timer button's tap or normal page scrolling. Re-created after every
-  // render since rebuilding the list's innerHTML tears down the old DOM
-  // nodes Sortable was attached to.
-  function initHomeDragSort(){
-    if(homeSortable){ homeSortable.destroy(); homeSortable = null; }
-    const list = document.getElementById('homeActivityList');
-    if(typeof Sortable === 'undefined' || !list.children.length) return;
-    homeSortable = new Sortable(list, {
-      handle: '.drag-handle',
-      animation: 150,
-      onEnd: async ()=>{
-        if(!currentUid) return;
-        const ids = [...list.children].map(li => li.dataset.id);
-        const batch = db.batch();
-        ids.forEach((id, idx) => batch.update(activitiesCol(currentUid).doc(id), { sortOrder: idx }));
-        try{ await batch.commit(); }
-        catch(err){ console.error('save reorder failed', err); alert('Could not save the new order — see console.'); }
-      },
-    });
+    initSortable('homeActivities', list, activitiesCol);
   }
 
   async function onTimerButtonClick(e){
@@ -373,11 +394,13 @@
   // ---------- PAGE: ACTIVITIES (management — shows every activity,
   // regardless of this week's scheduled visibility) ----------
   function renderActivitiesPage(){
+    if(deferIfDragging()) return;
     const list = document.getElementById('activityList');
     list.innerHTML = '';
     sortedActivities().forEach(a => {
       const li = document.createElement('li');
       li.className = 'activity-item';
+      li.dataset.id = a.id;
       li.innerHTML = `
         <div class="activity-item-top">
           <div>
@@ -388,11 +411,13 @@
               <button class="icon-btn edit-btn" data-id="${a.id}" title="Edit" type="button">✎</button>
               <button class="icon-btn danger delete-btn" data-id="${a.id}" title="Delete" type="button">✕</button>
             </div>
+            <div class="drag-handle" title="Drag to reorder">⠿</div>
           </div>
         </div>
       `;
       list.appendChild(li);
     });
+    initSortable('activitiesPage', list, activitiesCol);
   }
 
   document.getElementById('activityList').addEventListener('click', (e)=>{
@@ -519,6 +544,12 @@
   }
 
   const DAY_SHORT = { monday:'Mon', tuesday:'Tue', wednesday:'Wed', thursday:'Thu', friday:'Fri', saturday:'Sat', sunday:'Sun' };
+
+  // A goal's assigned activities in the shared activity order.
+  function goalActivities(goal){
+    const ids = new Set(goal.activityIds || []);
+    return sortedActivities().filter(a => ids.has(a.id));
+  }
 
   function goalWorkingDays(goal){
     return DAY_KEYS.filter(d => (goal.workingDays || []).includes(d));
@@ -650,6 +681,7 @@
   }
 
   function renderHomeGoals(){
+    if(deferIfDragging()) return;
     const box = document.getElementById('homeGoals');
     const resultsBox = document.getElementById('homeGoalResults');
     if(!box || !resultsBox) return;
@@ -676,13 +708,13 @@
       } else {
         progress = weekRow;
       }
-      const acts = (g.activityIds || []).map(id => activities.find(a => a.id === id)).filter(Boolean);
+      const acts = goalActivities(g);
       const actsHtml = acts.map(a => `
         <div class="goal-activity-row">
           <span class="goal-activity-name">${escapeHtml(a.name)}</span>
           <button class="btn-pill-icon timer-row-btn" data-id="${a.id}" type="button"${activeTimer ? ' disabled' : ''}>▶ Timer</button>
         </div>`).join('');
-      return `<div class="goal-card"><div class="goal-card-name">${escapeHtml(g.name)}</div>${progress}<div class="goal-activity-list">${actsHtml}</div></div>`;
+      return `<div class="goal-card" data-id="${g.id}"><div class="goal-card-head"><div class="goal-card-name">${escapeHtml(g.name)}</div><div class="drag-handle" title="Drag to reorder">⠿</div></div>${progress}<div class="goal-activity-list">${actsHtml}</div></div>`;
     }).join('');
 
     // Results: daily goals get a Mon–Sun strip; each weekly goal is one line.
@@ -716,16 +748,19 @@
           ${vacationNoteHtml(g, r)}
         </div>`;
     }).join('');
+    initSortable('homeGoals', box, goalsCol);
   }
 
   function renderGoalsPage(){
+    if(deferIfDragging()) return;
     const list = document.getElementById('goalList');
     list.innerHTML = '';
     document.getElementById('goalsEmpty').hidden = goals.length > 0;
     sortedGoals().forEach(g => {
-      const names = (g.activityIds || []).map(id => activities.find(a => a.id === id)).filter(Boolean).map(a => a.name);
+      const names = goalActivities(g).map(a => a.name);
       const li = document.createElement('li');
       li.className = 'activity-item';
+      li.dataset.id = g.id;
       li.innerHTML = `
         <div class="activity-item-top">
           <div>
@@ -738,11 +773,13 @@
               <button class="icon-btn edit-btn" data-id="${g.id}" title="Edit" type="button">✎</button>
               <button class="icon-btn danger delete-btn" data-id="${g.id}" title="Delete" type="button">✕</button>
             </div>
+            <div class="drag-handle" title="Drag to reorder">⠿</div>
           </div>
         </div>
       `;
       list.appendChild(li);
     });
+    initSortable('goalsPage', list, goalsCol);
   }
 
   function startGoalsListener(uid){
@@ -2352,7 +2389,7 @@
       if(timerTickHandle){ clearInterval(timerTickHandle); timerTickHandle = null; }
       if(timerPollHandle){ clearInterval(timerPollHandle); timerPollHandle = null; }
       if(periodRolloverIntervalHandle){ clearInterval(periodRolloverIntervalHandle); periodRolloverIntervalHandle = null; }
-      if(homeSortable){ homeSortable.destroy(); homeSortable = null; }
+      destroyAllSortables();
       closeActivityForm();
       closeGoalForm();
       closeVacationForm();
