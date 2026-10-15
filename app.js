@@ -511,6 +511,8 @@
 
   let goals = [];
   let unsubscribeGoals = null;
+  let vacations = [];
+  let unsubscribeVacations = null;
 
   function sortedGoals(){
     return [...goals].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
@@ -545,9 +547,19 @@
   // Scores one goal for one Monday–Sunday week. weekMondayStr is the week's
   // Monday as YYYY-MM-DD. Each day's time comes from entries whose `date` is
   // that day (a timed entry is dated the day it started). The weekly total
-  // counts every day Mon–Sun, working or not; daily hit/miss is only judged on
-  // working days. Extra time on one day never carries over to another.
-  function scoreGoalForWeek(goal, weekMondayStr, entries){
+  // counts every day Mon–Sun, working or not, vacation or not; daily hit/miss
+  // is only judged on scored days (working days not on vacation). Extra time
+  // on one day never carries over to another.
+  //
+  // Vacation (see `vacations`): a day is on vacation for this goal if a
+  // vacation covering that date lists the goal.
+  //  - daily goal: vacation working days aren't scored and drop out of the
+  //    weekly target (daily target x scored days). No scored days left = the
+  //    week is skipped.
+  //  - weekly goal: skipped only when all 7 days are covered. Otherwise the
+  //    target is unchanged, unless a covering vacation has scalePartialWeeks,
+  //    in which case it shrinks by (days off / 7).
+  function scoreGoalForWeek(goal, weekMondayStr, entries, vacs = vacations){
     const monday = new Date(weekMondayStr + 'T00:00:00');
     const ids = new Set(goal.activityIds || []);
     const working = new Set(goalWorkingDays(goal));
@@ -557,17 +569,29 @@
       const minutes = entries
         .filter(e => e.date === date && ids.has(e.activityId))
         .reduce((sum, e) => sum + e.durationMinutes, 0);
+      const covering = vacs.filter(v => (v.goalIds || []).includes(goal.id) && date >= v.startDate && date <= v.endDate);
+      const onVacation = covering.length > 0;
+      const scaledOff = covering.some(v => v.scalePartialWeeks);
       const isWorking = goal.type === 'daily' && working.has(dayKey);
-      return { dayKey, date, minutes, isWorking, hit: isWorking ? minutes >= goal.targetMinutes : null };
+      const scored = isWorking && !onVacation;
+      return { dayKey, date, minutes, isWorking, onVacation, scaledOff, scored, hit: scored ? minutes >= goal.targetMinutes : null };
     });
     const weeklyMinutes = days.reduce((sum, d) => sum + d.minutes, 0);
-    const weeklyTarget = goalWeeklyTargetMinutes(goal);
-    const workingDays = days.filter(d => d.isWorking);
+    const scoredDays = days.filter(d => d.scored);
+    let weeklyTarget, skipped;
+    if(goal.type === 'daily'){
+      weeklyTarget = goal.targetMinutes * scoredDays.length;
+      skipped = scoredDays.length === 0;
+    } else {
+      skipped = days.every(d => d.onVacation);
+      const scaledOffDays = days.filter(d => d.scaledOff).length;
+      weeklyTarget = skipped ? 0 : Math.round(goal.targetMinutes * (7 - scaledOffDays) / 7);
+    }
     return {
-      days, weeklyMinutes, weeklyTarget,
-      weeklyHit: weeklyMinutes >= weeklyTarget,
-      workingDayCount: workingDays.length,
-      daysHit: workingDays.filter(d => d.hit).length,
+      days, weeklyMinutes, weeklyTarget, skipped,
+      weeklyHit: skipped ? null : weeklyMinutes >= weeklyTarget,
+      workingDayCount: scoredDays.length,
+      daysHit: scoredDays.filter(d => d.hit).length,
     };
   }
 
@@ -608,6 +632,7 @@
     const resultsBox = document.getElementById('homeGoalResults');
     if(!box || !resultsBox) return;
     const list = sortedGoals();
+    renderDayOffMenu();
     if(!list.length){
       box.innerHTML = '<div class="empty-note">No goals yet — add one on the Goals page.</div>';
       resultsBox.innerHTML = '';
@@ -617,15 +642,17 @@
     const scored = list.map(g => ({ g, r: scoreGoalForWeek(g, periodBounds.weekStart, periodEntries) }));
 
     box.innerHTML = scored.map(({ g, r }) => {
+      const textRow = (label, text) => `<div class="goal-progress"><div class="goal-progress-line"><span class="goal-progress-label">${label}</span><span class="goal-progress-amount">${text}</span></div></div>`;
+      const weekRow = r.skipped ? textRow('This week', 'Vacation') : goalProgressHtml('This week', r.weeklyMinutes, r.weeklyTarget);
       let progress;
       if(g.type === 'daily'){
         const t = r.days.find(d => d.date === today);
-        progress = (t && t.isWorking)
-          ? goalProgressHtml('Today', t.minutes, g.targetMinutes)
-          : `<div class="goal-progress"><div class="goal-progress-line"><span class="goal-progress-label">Today</span><span class="goal-progress-amount">Not a working day</span></div></div>`;
-        progress += goalProgressHtml('This week', r.weeklyMinutes, r.weeklyTarget);
+        if(!t || !t.isWorking) progress = textRow('Today', 'Not a working day');
+        else if(t.onVacation) progress = textRow('Today', 'Vacation');
+        else progress = goalProgressHtml('Today', t.minutes, g.targetMinutes);
+        progress += weekRow;
       } else {
-        progress = goalProgressHtml('This week', r.weeklyMinutes, r.weeklyTarget);
+        progress = weekRow;
       }
       const acts = (g.activityIds || []).map(id => activities.find(a => a.id === id)).filter(Boolean);
       const actsHtml = acts.map(a => `
@@ -640,11 +667,13 @@
     resultsBox.innerHTML = scored.map(({ g, r }) => {
       const totalCls = r.weeklyHit ? ' is-reached' : '';
       if(g.type !== 'daily'){
-        return `<div class="goal-result-line"><span>${escapeHtml(g.name)}</span><span class="goal-result-total${totalCls}">${fmtDuration(r.weeklyMinutes)} / ${fmtDuration(r.weeklyTarget)}${r.weeklyHit ? ' ✓' : ''}</span></div>`;
+        const right = r.skipped ? 'Vacation' : `${fmtDuration(r.weeklyMinutes)} / ${fmtDuration(r.weeklyTarget)}${r.weeklyHit ? ' ✓' : ''}`;
+        return `<div class="goal-result-line"><span>${escapeHtml(g.name)}</span><span class="goal-result-total${totalCls}">${right}</span></div>`;
       }
       const cells = r.days.map(d => {
         let icon, cls;
         if(!d.isWorking){ icon = 'off'; cls = 'is-off'; }
+        else if(d.onVacation){ icon = 'Vacation'; cls = 'is-vacation'; }
         else if(d.hit){ icon = '✓'; cls = 'is-hit'; }
         else if(d.date < today){ icon = '✗'; cls = 'is-miss'; }
         else if(d.date === today){ icon = '●'; cls = 'is-pending'; }
@@ -658,8 +687,8 @@
       return `
         <div class="goal-result">
           <div class="goal-result-line">
-            <span>${escapeHtml(g.name)} · ${r.daysHit} of ${r.workingDayCount} days</span>
-            <span class="goal-result-total${totalCls}">${fmtDuration(r.weeklyMinutes)} / ${fmtDuration(r.weeklyTarget)}</span>
+            <span>${escapeHtml(g.name)} · ${r.skipped ? 'Vacation this week' : `${r.daysHit} of ${r.workingDayCount} days`}</span>
+            <span class="goal-result-total${totalCls}">${r.skipped ? fmtDuration(r.weeklyMinutes) : `${fmtDuration(r.weeklyMinutes)} / ${fmtDuration(r.weeklyTarget)}`}</span>
           </div>
           <div class="day-strip">${cells}</div>
         </div>`;
@@ -700,6 +729,7 @@
         goals = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         renderGoalsPage();
         renderHomeGoals();
+        renderVacationList();
       },
       err => {
         console.error('goals listener failed', err);
@@ -834,6 +864,213 @@
       alert('Delete failed — see console.');
     }
   }
+
+  // ---------- VACATIONS ----------
+  // users/{uid}/vacations/{id}:
+  //   { startDate, endDate (YYYY-MM-DD, inclusive), goalIds: [...],
+  //     scalePartialWeeks: bool, createdAt }
+  // The goal list is explicit: a goal created later is NOT on an existing
+  // vacation until you edit that vacation and tick it. scoreGoalForWeek reads
+  // these; nothing about a vacation is ever written into entries or goals.
+  function vacationsCol(uid){ return db.collection('users').doc(uid).collection('vacations'); }
+
+  function fmtVacationDate(dateStr, withYear){
+    const d = new Date(dateStr + 'T00:00:00');
+    return `${MONTHS_SHORT[d.getMonth()]} ${d.getDate()}${withYear ? `, ${d.getFullYear()}` : ''}`;
+  }
+  function fmtVacationRange(v){
+    const thisYear = new Date().getFullYear();
+    const sameYear = v.startDate.slice(0, 4) === v.endDate.slice(0, 4);
+    const showYear = v.startDate.slice(0, 4) !== String(thisYear) || v.endDate.slice(0, 4) !== String(thisYear);
+    if(v.startDate === v.endDate){
+      const d = new Date(v.startDate + 'T00:00:00');
+      return `${DAY_SHORT[DAY_KEYS[(d.getDay() + 6) % 7]]}, ${fmtVacationDate(v.startDate, showYear)}`;
+    }
+    return `${fmtVacationDate(v.startDate, showYear && !sameYear)} – ${fmtVacationDate(v.endDate, showYear)}`;
+  }
+
+  function renderVacationList(){
+    const box = document.getElementById('vacationList');
+    if(!box) return;
+    const today = todayDateStr();
+    const current = vacations.filter(v => v.endDate >= today).sort((a, b) => a.startDate.localeCompare(b.startDate));
+    const past = vacations.filter(v => v.endDate < today).sort((a, b) => b.startDate.localeCompare(a.startDate));
+    if(!vacations.length){
+      box.innerHTML = '<div class="empty-note">No vacations yet.</div>';
+      return;
+    }
+    const row = v => {
+      const live = (v.goalIds || []).map(id => goals.find(g => g.id === id)).filter(Boolean);
+      const allGoals = goals.length > 0 && live.length === goals.length;
+      const names = !live.length ? 'No goals' : (allGoals ? 'All goals' : live.map(g => g.name).join(', '));
+      return `
+        <li class="activity-item">
+          <div class="activity-item-top">
+            <div>
+              <div class="name">${escapeHtml(fmtVacationRange(v))}</div>
+              <div class="goal-summary">${escapeHtml(names)}${v.scalePartialWeeks ? ' · reduces weekly goals' : ''}</div>
+            </div>
+            <div class="item-right"><div class="item-actions">
+              <button class="icon-btn vac-edit-btn" data-id="${v.id}" title="Edit" type="button">✎</button>
+              <button class="icon-btn danger vac-delete-btn" data-id="${v.id}" title="Delete" type="button">✕</button>
+            </div></div>
+          </div>
+        </li>`;
+    };
+    box.innerHTML =
+      (current.length ? `<div class="vac-group-label">Current &amp; upcoming</div><ul class="activity-list">${current.map(row).join('')}</ul>` : '') +
+      (past.length ? `<div class="vac-group-label">Past</div><ul class="activity-list">${past.map(row).join('')}</ul>` : '');
+  }
+
+  function startVacationsListener(uid){
+    if(unsubscribeVacations) unsubscribeVacations();
+    unsubscribeVacations = vacationsCol(uid).onSnapshot(
+      snap => {
+        vacations = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        renderVacationList();
+        renderHomeGoals();
+        if(activeTimer) tickTimerBanner();
+        if(currentPage === 'history') renderHistoryPage();
+      },
+      err => {
+        console.error('vacations listener failed', err);
+        showConnectionError('Firestore connection failed — see console.');
+      }
+    );
+  }
+
+  // ---------- vacation add/edit form (Settings) ----------
+  const vacationFormEl = document.getElementById('vacationForm');
+  const vacationErrorEl = document.getElementById('vacationFormError');
+
+  function setVacationError(msg){
+    if(msg){ vacationErrorEl.textContent = msg; vacationErrorEl.hidden = false; }
+    else { vacationErrorEl.hidden = true; vacationErrorEl.textContent = ''; }
+  }
+
+  function openVacationForm(v){
+    setVacationError(null);
+    const today = todayDateStr();
+    document.getElementById('vacationFormId').value = v ? v.id : '';
+    document.getElementById('vacationStart').value = v ? v.startDate : today;
+    document.getElementById('vacationEnd').value = v ? v.endDate : today;
+    const picked = new Set(v ? v.goalIds || [] : sortedGoals().map(g => g.id));   // new: all checked
+    document.getElementById('vacationGoalChecks').innerHTML = sortedGoals().length
+      ? sortedGoals().map(g => `<label class="check-row"><input type="checkbox" value="${g.id}" ${picked.has(g.id) ? 'checked' : ''}><span>${escapeHtml(g.name)}</span></label>`).join('')
+      : '<div class="empty-note">Add a goal first.</div>';
+    document.getElementById('vacationScale').checked = !!(v && v.scalePartialWeeks);
+    vacationFormEl.hidden = false;
+    vacationFormEl.scrollIntoView({ block: 'nearest' });
+  }
+  function closeVacationForm(){
+    vacationFormEl.hidden = true;
+    setVacationError(null);
+  }
+
+  document.getElementById('addVacationBtn').addEventListener('click', ()=> openVacationForm(null));
+  document.getElementById('vacationCancelBtn').addEventListener('click', closeVacationForm);
+
+  vacationFormEl.addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    if(!currentUid) return;
+    const startDate = document.getElementById('vacationStart').value;
+    const endDate = document.getElementById('vacationEnd').value;
+    const goalIds = [...document.querySelectorAll('#vacationGoalChecks input:checked')].map(i => i.value);
+    if(!startDate || !endDate){ setVacationError('Choose a start and end date.'); return; }
+    if(endDate < startDate){ setVacationError('The end date can’t be before the start date.'); return; }
+    if(goalIds.length === 0){ setVacationError('Choose at least one goal.'); return; }
+    const fields = { startDate, endDate, goalIds, scalePartialWeeks: document.getElementById('vacationScale').checked };
+    const id = document.getElementById('vacationFormId').value;
+    const saveBtn = document.getElementById('vacationSaveBtn');
+    saveBtn.disabled = true;
+    try{
+      if(id) await vacationsCol(currentUid).doc(id).update(fields);
+      else await vacationsCol(currentUid).add({ ...fields, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+      closeVacationForm();
+    }catch(err){
+      console.error('save vacation failed', err);
+      setVacationError('Save failed — see console.');
+    }finally{
+      saveBtn.disabled = false;
+    }
+  });
+
+  document.getElementById('vacationList').addEventListener('click', async (e)=>{
+    const editBtn = e.target.closest('.vac-edit-btn');
+    const delBtn = e.target.closest('.vac-delete-btn');
+    const v = vacations.find(x => x.id === (editBtn || delBtn || { dataset: {} }).dataset.id);
+    if(!v) return;
+    if(editBtn){ openVacationForm(v); return; }
+    if(!confirm(`Delete the vacation ${fmtVacationRange(v)}? Your goals recalculate without it.`)) return;
+    try{ await vacationsCol(currentUid).doc(v.id).delete(); }
+    catch(err){ console.error('delete vacation failed', err); alert('Delete failed — see console.'); }
+  });
+
+  // ---------- quick "Day off" on Home ----------
+  let toastTimer = null;
+  function showToast(message, actions){
+    const el = document.getElementById('toast');
+    el.innerHTML = `<span class="toast-msg"></span>`;
+    el.querySelector('.toast-msg').textContent = message;
+    actions.forEach(a => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.textContent = a.label;
+      b.addEventListener('click', ()=>{ hideToast(); a.fn(); });
+      el.appendChild(b);
+    });
+    el.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(hideToast, 9000);
+  }
+  function hideToast(){
+    clearTimeout(toastTimer);
+    document.getElementById('toast').hidden = true;
+  }
+
+  function dayOffDate(offset){
+    const d = new Date(); d.setDate(d.getDate() + offset);
+    return dateToStr(d);
+  }
+  // True when every current goal is already on vacation that day.
+  function dayFullyOff(date){
+    return goals.length > 0 && goals.every(g =>
+      vacations.some(v => (v.goalIds || []).includes(g.id) && date >= v.startDate && date <= v.endDate));
+  }
+  function renderDayOffMenu(){
+    const toggle = document.getElementById('dayOffToggle');
+    if(!toggle) return;
+    toggle.hidden = goals.length === 0;
+    if(goals.length === 0) document.getElementById('dayOffMenu').hidden = true;
+    [['dayOffToday', 0, 'Today'], ['dayOffYesterday', -1, 'Yesterday']].forEach(([id, offset, label]) => {
+      const b = document.getElementById(id);
+      const off = dayFullyOff(dayOffDate(offset));
+      b.disabled = off;
+      b.textContent = off ? `${label} ✓` : label;
+    });
+  }
+
+  async function markDayOff(offset, label){
+    if(!currentUid || !goals.length) return;
+    const fields = { startDate: dayOffDate(offset), endDate: dayOffDate(offset), goalIds: goals.map(g => g.id), scalePartialWeeks: false };
+    document.getElementById('dayOffMenu').hidden = true;
+    try{
+      const ref = await vacationsCol(currentUid).add({ ...fields, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+      showToast(`${label} marked as a day off for all goals.`, [
+        { label: 'Choose goals', fn: ()=>{ navigateTo('settings'); openVacationForm({ id: ref.id, ...fields }); } },
+        { label: 'Undo', fn: ()=> ref.delete().catch(err => console.error('undo day off failed', err)) },
+      ]);
+    }catch(err){
+      console.error('day off failed', err);
+      alert('Could not save the day off — see console.');
+    }
+  }
+
+  document.getElementById('dayOffToggle').addEventListener('click', ()=>{
+    const menu = document.getElementById('dayOffMenu');
+    menu.hidden = !menu.hidden;
+  });
+  document.getElementById('dayOffToday').addEventListener('click', ()=> markDayOff(0, 'Today'));
+  document.getElementById('dayOffYesterday').addEventListener('click', ()=> markDayOff(-1, 'Yesterday'));
 
   // ---------- PAGE: PLANNER ----------
   // users/{uid}/schedules/{scheduleId}: { name, days, createdAt }
@@ -1547,12 +1784,16 @@
         const t = r.days.find(d => d.date === today);
         if(!t || !t.isWorking){
           lines.push({ label: `${g.name} today`, text: 'Day off', kind: 'off' });
+        } else if(t.onVacation){
+          lines.push({ label: `${g.name} today`, text: 'Vacation', kind: 'off' });
         } else {
           const dayMs = t.minutes * 60000 + (sessionDate === today ? activeMs : 0);
           lines.push({ label: `${g.name} today`, ...countdownValue(g.targetMinutes * 60000 - dayMs) });
         }
       }
-      lines.push({ label: `${g.name} this week`, ...countdownValue(r.weeklyTarget * 60000 - weekMs) });
+      lines.push(r.skipped
+        ? { label: `${g.name} this week`, text: 'Vacation', kind: 'off' }
+        : { label: `${g.name} this week`, ...countdownValue(r.weeklyTarget * 60000 - weekMs) });
     });
     return lines;
   }
@@ -2050,6 +2291,7 @@
       startAllEntriesListener(user.uid);
       startTimerListener(user.uid);
       startGoalsListener(user.uid);
+      startVacationsListener(user.uid);
       startSchedulesListener(user.uid);
       startSettingsListener(user.uid);
       periodRolloverIntervalHandle = setInterval(checkForPeriodRollover, 60 * 1000);
@@ -2072,6 +2314,7 @@
       activeTimer = null;
       schedules = [];
       goals = [];
+      vacations = [];
       editingScheduleId = null;
       currentSettings = {};
       if(unsubscribeActivities){ unsubscribeActivities(); unsubscribeActivities = null; }
@@ -2080,6 +2323,7 @@
       if(unsubscribeAllEntries){ unsubscribeAllEntries(); unsubscribeAllEntries = null; }
       if(unsubscribeTimer){ unsubscribeTimer(); unsubscribeTimer = null; }
       if(unsubscribeGoals){ unsubscribeGoals(); unsubscribeGoals = null; }
+      if(unsubscribeVacations){ unsubscribeVacations(); unsubscribeVacations = null; }
       if(unsubscribeSchedules){ unsubscribeSchedules(); unsubscribeSchedules = null; }
       if(unsubscribeSettings){ unsubscribeSettings(); unsubscribeSettings = null; }
       if(timerTickHandle){ clearInterval(timerTickHandle); timerTickHandle = null; }
@@ -2088,6 +2332,8 @@
       if(homeSortable){ homeSortable.destroy(); homeSortable = null; }
       closeActivityForm();
       closeGoalForm();
+      closeVacationForm();
+      hideToast();
       closeAssignModal();
       closeStopModal();
       releaseKeepAwake();

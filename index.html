@@ -11,7 +11,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=32">
+<link rel="stylesheet" href="styles.css?v=33">
 </head>
 <body>
 <div id="app">
@@ -80,7 +80,14 @@
       <!-- Goals: today/week progress per goal, with a Timer button for each
            assigned activity. -->
       <div class="section-block">
-        <h3 class="section-subtitle">Goals</h3>
+        <div class="home-goals-header">
+          <h3 class="section-subtitle">Goals</h3>
+          <button class="btn-pill-icon day-off-toggle" id="dayOffToggle" type="button" hidden>Day off</button>
+        </div>
+        <div class="day-off-menu" id="dayOffMenu" hidden>
+          <button class="btn-ghost" id="dayOffToday" type="button">Today</button>
+          <button class="btn-ghost" id="dayOffYesterday" type="button">Yesterday</button>
+        </div>
         <div id="homeGoals"></div>
       </div>
 
@@ -261,6 +268,39 @@
     <!-- PAGE: SETTINGS -->
     <section id="page-settings" class="page" hidden>
       <h2 class="section-title">Settings</h2>
+
+      <!-- Vacation: days or weeks off that aren't scored as missed goals. -->
+      <div class="section-block">
+        <div class="section-header-row">
+          <h3 class="section-subtitle">Vacation</h3>
+          <button class="btn-pill-icon" id="addVacationBtn" type="button">+ Add</button>
+        </div>
+        <form id="vacationForm" class="activity-form" hidden>
+          <input type="hidden" id="vacationFormId" value="">
+          <label class="form-label">Start date
+            <input type="date" id="vacationStart" class="form-input">
+          </label>
+          <label class="form-label">End date
+            <input type="date" id="vacationEnd" class="form-input">
+          </label>
+          <div class="form-label">Goals on vacation
+            <div class="check-list" id="vacationGoalChecks"></div>
+          </div>
+          <label class="check-row vac-scale-row">
+            <input type="checkbox" id="vacationScale">
+            <span>Also reduce weekly goals for partial weeks
+              <small>A weekly goal’s target shrinks by the days off ÷ 7 (3 of 7 days off → 4/7 of the target). Daily goals always lose their vacation days. Weeks fully covered are skipped either way.</small>
+            </span>
+          </label>
+          <div class="form-error" id="vacationFormError" hidden></div>
+          <div class="form-actions">
+            <button type="submit" class="btn-primary" id="vacationSaveBtn">Save</button>
+            <button type="button" class="btn-ghost" id="vacationCancelBtn">Cancel</button>
+          </div>
+        </form>
+        <div id="vacationList"></div>
+      </div>
+
       <button class="btn-ghost btn-block" id="signoutBtn" type="button">Sign out</button>
       <div class="app-version" id="appVersion"></div>
     </section>
@@ -268,6 +308,9 @@
 
   <!-- Stop-timer confirmation — always shown on Stop, never conditional on
        the duration looking unusual. Global overlay, reachable from any page. -->
+  <!-- Brief message with actions (e.g. after marking a day off). -->
+  <div id="toast" class="toast" hidden></div>
+
   <div id="stopTimerModal" class="modal-backdrop" hidden>
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="stopModalTitle">
       <!-- Dismiss without doing anything: the timer carries on untouched.
@@ -321,6 +364,6 @@
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
-<script src="app.js?v=32"></script>
+<script src="app.js?v=33"></script>
 </body>
 </html>
