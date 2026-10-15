@@ -344,7 +344,7 @@
         .map(part => ({ part, items: (schedule.days && schedule.days[day] && schedule.days[day][part]) || [] }))
         .filter(p => p.items.length);
       const partsHtml = parts.length
-        ? parts.map(p => `<div class="home-plan-part"><span class="home-plan-part-label">${DAYPART_LABELS[p.part]}:</span> ${p.items.map(it => `${escapeHtml(activityName(it.activityId))} ${fmtDuration(it.minutes)}`).join(', ')}</div>`).join('')
+        ? parts.map(p => `<div class="home-plan-part"><span class="home-plan-part-label">${DAYPART_LABELS[p.part]}:</span> ${p.items.map(it => `${escapeHtml(activityName(it.activityId))}${plannerItemTime(it) ? ' ' + plannerItemTime(it) : ''}`).join(', ')}</div>`).join('')
         : '<div class="home-plan-part empty">Nothing planned</div>';
       return `
         <div class="home-plan-day">
@@ -1164,6 +1164,8 @@
   async function markDayOff(offset, label){
     if(!currentUid || !goals.length) return;
     const fields = { startDate: dayOffDate(offset), endDate: dayOffDate(offset), goalIds: goals.map(g => g.id), scalePartialWeeks: false };
+    const d = new Date(fields.startDate + 'T00:00:00');
+    if(!confirm(`Mark ${label.toLowerCase()} (${WEEKDAYS[d.getDay()]}, ${MONTHS_SHORT[d.getMonth()]} ${d.getDate()}) as a day off for all goals?`)) return;
     document.getElementById('dayOffMenu').hidden = true;
     try{
       const ref = await vacationsCol(currentUid).add({ ...fields, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
@@ -1186,7 +1188,7 @@
   // ---------- PAGE: PLANNER ----------
   // users/{uid}/schedules/{scheduleId}: { name, days, createdAt }
   // days: { monday: {morning:[], afternoon:[], evening:[]}, ... sunday: {...} }
-  // Each day-part array holds { activityId, minutes } assignments. Day-part
+  // Each day-part array holds { activityId, minutes? } assignments (minutes optional). Day-part
   // granularity only, per spec — no exact clock times.
   const DAY_KEYS = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
   const DAY_LABELS = { monday:'Monday', tuesday:'Tuesday', wednesday:'Wednesday', thursday:'Thursday', friday:'Friday', saturday:'Saturday', sunday:'Sunday' };
@@ -1194,6 +1196,14 @@
   const DAYPART_LABELS = { morning:'Morning', afternoon:'Afternoon', evening:'Evening' };
 
   function schedulesCol(uid){ return db.collection('users').doc(uid).collection('schedules'); }
+
+  // A Planner item's time is optional: older items carry `minutes`, newer
+  // ones can be a plain note ({ activityId } only). Everything that shows a
+  // Planner time goes through here so a missing time is just a name — never
+  // "0 min" and never an error.
+  function plannerItemTime(item){
+    return (typeof item.minutes === 'number' && item.minutes > 0) ? fmtDuration(item.minutes) : '';
+  }
 
   function emptyScheduleDays(){
     const days = {};
@@ -1307,7 +1317,7 @@
       const partsHtml = DAYPART_KEYS.map(part => {
         const items = (schedule.days && schedule.days[day] && schedule.days[day][part]) || [];
         const chips = items.map((item, idx) => `
-          <span class="planner-chip">${escapeHtml(activityName(item.activityId))} · ${fmtDuration(item.minutes)}
+          <span class="planner-chip">${escapeHtml(activityName(item.activityId))}${plannerItemTime(item) ? ' · ' + plannerItemTime(item) : ''}
             <button class="chip-remove" data-day="${day}" data-part="${part}" data-idx="${idx}" title="Remove" type="button">✕</button>
           </span>
         `).join('');
@@ -1379,11 +1389,18 @@
     const schedule = schedules.find(s => s.id === editingScheduleId);
     if(!schedule) return;
     const activityId = assignActivityEl.value;
-    const minutes = parseInt(assignMinutesEl.value, 10);
     if(!activityId){ setAssignError('Add an activity first.'); return; }
-    if(!minutes || minutes <= 0){ setAssignError('Enter a positive number of minutes.'); return; }
+    // Time is optional: blank saves a plain note with no time at all.
+    const raw = assignMinutesEl.value.trim();
+    const item = { activityId };
+    if(assignMinutesEl.validity.badInput){ setAssignError('That isn’t a number. Enter minutes, or leave it blank.'); return; }
+    if(raw !== ''){
+      const minutes = Number(raw);
+      if(!Number.isInteger(minutes) || minutes <= 0){ setAssignError('Enter a whole number of minutes above zero, or leave it blank.'); return; }
+      item.minutes = minutes;
+    }
     const days = cloneDays(schedule.days);
-    days[assignTargetDay][assignTargetPart].push({ activityId, minutes });
+    days[assignTargetDay][assignTargetPart].push(item);
     try{
       await schedulesCol(currentUid).doc(schedule.id).update({ days });
       closeAssignModal();
